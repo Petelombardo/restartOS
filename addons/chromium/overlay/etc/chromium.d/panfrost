@@ -1,0 +1,5 @@
+# Mesa 25.0 Panfrost (Mali-G610) overruns a staging copy in panfrost_ptr_unmap
+# on some glTexImage2D uploads (Zoom screen-share frames), crashing the GPU
+# process. Linear textures avoid that path. Ignored by non-Panfrost drivers.
+# Drop once the base ships a newer Mesa (trixie-backports has 26.x).
+export PAN_MESA_DEBUG=linear

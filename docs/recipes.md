@@ -145,7 +145,7 @@ Current addons:
   volume with its LEDs out of sync; `etc/wireplumber/wireplumber.conf.d/51-emeet-volume.conf`
   sets `api.alsa.ignore-dB` for it so the device's own volume follows the system.
   Add other such devices to its `matches`.
-* **chromium** — bases system + labwc; chromium plus the v14 `launch-chromium` wrapper. The wrapper passes `--disable-accelerated-video-decode`: on RK3588 the V4L2 hardware decoder crashed the GPU process when Zoom screen shares arrived, and Chromium then dropped GPU acceleration entirely.
+* **chromium** — bases system + labwc; chromium plus the v14 `launch-chromium` wrapper. The wrapper passes `--disable-accelerated-video-decode`: on RK3588 the V4L2 hardware decoder crashed the GPU process when Zoom screen shares arrived, and Chromium then dropped GPU acceleration entirely. Even with that, Zoom screen shares from some presenters still crashed it inside Mesa 25.0 Panfrost (`glTexImage2D` → `panfrost_ptr_unmap` → `util_copy_rect` writing past the buffer), so `overlay/etc/chromium.d/panfrost` exports `PAN_MESA_DEBUG=linear` (Debian's `/usr/bin/chromium` sources `/etc/chromium.d/*`); drop it once the base moves to a newer Mesa.
 * **ai** — git from debs; `post-build` copies Claude Code (native binary, auto-update
   off via `/etc/claude-code/managed-settings.json`) to `/opt/claude` and pi (+ its own
   node) to `/opt/pi` from the host user's installs. No user config is shipped.
