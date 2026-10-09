@@ -1,0 +1,9 @@
+#!/bin/sh
+# Keep pi sessions in ./.pi/sessions of the folder pi is started from, so a session
+# started in a persistent folder survives a reboot (pi creates the folder itself).
+# --session-dir, a preset PI_CODING_AGENT_SESSION_DIR, or sessionDir in settings
+# (user or ./.pi/settings.json) still win.
+if [ -z "$PI_CODING_AGENT_SESSION_DIR" ] && ! grep -qs '"sessionDir"' "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/settings.json" .pi/settings.json; then
+	export PI_CODING_AGENT_SESSION_DIR=.pi/sessions
+fi
+exec /opt/pi/agent/bin/pi "$@"

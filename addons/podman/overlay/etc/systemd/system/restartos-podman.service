@@ -1,0 +1,13 @@
+# Started by /scripts/startup/podman once the podman disk is mounted.
+[Unit]
+Description=restartOS podman compose stacks
+After=restartos.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/scripts/podman-services start
+ExecStop=/scripts/podman-services stop
+TimeoutStartSec=infinity
+TimeoutStopSec=180

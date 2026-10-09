@@ -1,0 +1,246 @@
+#!/bin/bash
+IFS="
+"
+alias nc=/usr/bin/nc.traditional
+count=0
+bold=$(tput bold)
+normal=$(tput sgr0)
+compressed=1
+COMPRESSLEVEL=1
+
+DESTIP=$1
+DESTPORT=$2
+
+echo $DESTIP
+
+disable_zram () {
+        if [ $(swapon -s | grep zram | wc -l) -gt 0 ]; then
+                ZRAM_ENABLED=1
+		swapoff -a
+#                service zram stop
+        else
+                ZRAM_ENABLED=0
+        fi
+}
+
+enable_zram() {
+        if [ $ZRAM_ENABLED -eq 1 ]; then
+		swapon -a
+#                service zram start
+        fi
+}
+
+disable_zram
+
+get_bootloader_bytes () {
+	SECTORSIZE=`fdisk -l $disk | grep "^Sector size" | cut -d'/' -f2 | cut -d' ' -f2`
+	START=""
+	for i in `fdisk -l $disk | grep "^\/dev\/" | sed -e 's/\/dev\/[a-z]*[0-9]*[ \*]*//' | cut -d' ' -f1`
+	do
+	        if [ "$START" == "" ] && [ ! "$i" == "" ]; then
+	                START=$i
+	        fi
+	        if [ ! "$i" == "" ] && [ ! "$START" == "" ]; then
+	                if [ $i -lt $START ]; then
+	                        START=$i
+	                fi
+	        fi
+	done
+	if [ $START -ge 0 ]; then
+	        BOOTLOADER_BYTES=$((START * SECTORSIZE))
+		BOOTLOADER_BYTES=$((BOOTLOADER_BYTES - 1))
+	else
+		BOOTLOADER_BYTES=512
+	fi
+}
+
+
+
+echo	"ID	Option Type"
+echo	"1	Disk"
+echo	"2	Partition"
+echo	"3	MBR"
+echo	"4	File"
+echo -n "Type the ID of the type of clone that you wish to perform [1]: "
+read option
+
+case $option in
+1)
+	type="disk"
+	;;
+2)
+	type="partition"
+	;;
+3)
+	type="MBR"
+	;;
+4)
+	type="file"
+	;;
+*)
+	type="disk"
+	;;
+esac
+
+echo ""
+echo "ID	$type"
+if [ "$type" == "partition" ]; then
+	for i in `lsblk -e 7 -e 11 -lp | grep "part" | sed -e 's/^\([a-z0-9]*\) * [0-9]*:[0-9]* *[0-9] *\([0-9\.GMKT]*\) .*/\1 \2/' | sort`
+	do
+		count=$((count+1))
+		echo "$count	$i"
+		disks="$disks"$'\n'"$count $i"
+	done
+elif [ "$type" == "file" ]; then
+	echo -n "File name: "
+	read filename
+	if [ "$filename" == "" ] || [ ! -f "$filename" ]; then
+		echo "Exiting.  Invalid file name."
+		exit
+	fi
+else
+	for i in `lsblk -e 7 -e 11 -lp | grep "disk" | sed -e 's/^\([a-z0-9]*\) * [0-9]*:[0-9]* *[0-9] *\([0-9\.GMKT]*\) .*/\1 \2/' | sort`
+	do
+		count=$((count+1))
+		echo "$count	$i"
+		disks="$disks"$'\n'"$count $i"
+	done
+fi
+if [ ! "$type" == "file" ]; then
+	echo ""
+	echo -n "Type the ID matching the $type that you wish to ${bold}copy${normal}: "
+	read disknum
+	disk=`echo "$disks" | grep "^$disknum " | cut -d' ' -f2`
+	if [ "$disk" == "" ]; then
+		echo "Sorry, but that is not a valid selection.  Exiting."
+		exit
+	fi
+fi
+
+
+echo "Ready to copy $type ${bold}$disk${normal}."
+if [ ! "$type" == "file" ]; then
+	umount ${disk}* > /dev/null 2>&1
+	blockdev --setra 8192 ${disk} > /dev/null 2>&1
+	OLDRA=`blockdev --getra ${disk}`
+	OLDSWAP=`cat /proc/sys/vm/swappiness`
+	echo 0 > /proc/sys/vm/swappiness > /dev/null 2>&1
+fi
+
+IP=`ip addr | grep "inet " | grep -v "127.0.0.1" | sed -e 's/^ *//' | cut -d' ' -f2 | cut -d'/' -f1 | grep "" -m1`
+
+
+if [ "$DESTIP" == "" ]; then
+	echo "Waiting for handshake from target server."
+	go=0
+	count=0
+	RESULT=`echo "ready" | nc -l -b -u -p 1234 -w30 -q1; go=1;`
+	ncpid=$!
+	if [ "$RESULT" == "" ]; then
+	        echo "Automatic discover timeout. Would you like to wait longer?"
+	        echo -n "[${bold}y${normal}|n]: "
+	        read WAITLONGER
+		if [ "$WAITLONGER" == "n" ] || [ "$WAITLONGER" == "N" ]; then
+		        echo "Please enter the IP manually, or ctl-c to exit."
+		        echo -n "Remote IP:PORT : "
+		        read RESULT
+			COMPRESSLEVEL=9
+		else
+			go=0
+			count=0
+			RESULT=`echo "ready" | nc -l -p 1234 -w60 -q1 -u && go=1 || go=0`
+		fi
+		if [ "$RESULT" == "" ]; then
+			echo "Automatic discover timeout. Please enter the IP manually, or ctl-c and restart to resume auto detection."
+			echo -n "Remote IP:PORT : "
+			read RESULT
+			COMPRESSLEVEL=9
+		fi
+	fi
+else
+	RESULT="$DESTIP:$DESTPORT"
+fi
+
+REMOTEIP=`echo $RESULT | cut -d':' -f1`
+
+# Prefer to use the interface IP rather than 127.0.0.1;   Testing the perf benefit of doing this.
+if [ "$REMOTEIP" == "$IP" ]; then
+	REMOTEIP="127.0.0.1"
+fi
+
+RPORT=`echo $RESULT | cut -d':' -f2`
+if [ "$RPORT" == "" ] || [ "$RPORT" == "$REMOTEIP" ]; then
+	RPORT=1235
+fi
+
+if [ "$REMOTEIP" == "" ]; then
+	echo "No remote IP detected.  Aborting."
+	exit
+fi
+echo -n "Do you want to send this image to ${bold}$REMOTEIP:$RPORT${normal}? [y]: "
+read answer
+if [ ! "$answer" == "y" ] && [ ! "$answer" == "Y" ] && [ ! "$answer" == "yes" ] && [ ! "$answer" == "" ]; then
+	echo "Aborted"
+	exit
+fi
+
+if [ "$type" == "file" ]; then
+        source="$filename"
+	size=`du -s $filename | sed -e 's/^\([0-9]*\).*$/\1/'`
+	compressed=`echo $filename | sed -e 's/.*\.//' | grep lz4 | wc -l`
+else
+        source="$disk"
+	size=`lsblk -o size,name -bpl | sed -e 's/^ *//' | grep " $disk$" | cut -d' ' -f1`
+	if [ `echo $REMOTEIP | grep "^127.0.0.1" | wc -l` -eq 1 ]; then
+		compressed=0
+	else
+		compressed=1
+	fi
+fi
+
+if [ "$size" == "" ]; then
+	size=1;
+fi
+
+CONFIRMED="0"
+while [ "$CONFIRMED" == "0" ];
+do
+	echo "Total size: $size; Compression: $compressed; Destination $REMOTEIP:$RPORT"
+	CONFIRMED=`echo "$size:$compressed" | nc -w1 $REMOTEIP $RPORT 2> /dev/null && echo 1 || sleep 1 && echo 0`
+done
+
+sleep 2
+
+if [ "$type" == "MBR" ]; then
+	get_bootloader_bytes
+	if [ $compressed -eq 1 ]; then
+		dd bs=1 count=$BOOTLOADER_BYTES if=$source | lz4 -$COMPRESSLEVEL | nc $REMOTEIP $RPORT -w1
+	else
+		dd bs=1 count=$BOOTLOADER_BYTES if=$source | nc $REMOTEIP $RPORT -w1
+	fi
+elif [ "$type" == "file" ]; then
+	#  The compression bit will tell the other side if the file is compressed or not.  We won't make any changes here.
+	pv -btearp -B 4194304 -N SOURCE < $source | nc $REMOTEIP $RPORT -w1
+	STATUS=$?
+else
+	if [ $compressed -eq 1 ]; then
+		pv -btearp -B 4194304 -N "SOURCE LZ4" < $source | lz4 -$COMPRESSLEVEL | nc $REMOTEIP $RPORT -w1
+		STATUS=$?
+	else
+		pv -btearp -B 4194304 -N SOURCE < $source | nc $REMOTEIP $RPORT -w1
+		STATUS=$?
+	fi
+fi
+
+if [ ! "$type" == "file" ]; then
+	echo $OLDSWAP > /proc/sys/vm/swappiness
+	blockdev --setra $OLDRA ${disk}
+fi
+
+if [ ! "$STATUS" == "0" ]; then
+	echo "ERROR"
+	read nothing
+fi
+
+enable_zram
+

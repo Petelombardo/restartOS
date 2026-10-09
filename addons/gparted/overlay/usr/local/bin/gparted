@@ -1,0 +1,8 @@
+#!/bin/sh
+# Start GParted as root on the restartos Wayland session. Debian's launcher goes
+# through pkexec, which drops WAYLAND_DISPLAY, so GTK falls back to Xwayland, and
+# Xwayland refuses root (Debian builds it without the xhost workaround).
+# restartos has NOPASSWD sudo; keeping just the session socket vars lets root GParted
+# draw natively on Wayland while HOME etc. stay root's.
+[ "$(id -u)" = 0 ] && exec /usr/sbin/gparted "$@"
+exec sudo -n --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DISPLAY /usr/sbin/gparted "$@"

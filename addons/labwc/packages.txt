@@ -1,0 +1,27 @@
+# restartOS 15 labwc addon: labwc desktop + greetd/tuigreet, autologin as restartos.
+# Dependencies already in system.img are skipped automatically by create-package.
+
+# Compositor, login
+labwc xwayland greetd tuigreet dbus-user-session
+
+# Used by ~/.config/labwc/autostart
+sway-notification-center swaybg swayidle swaylock wlopm waybar wlr-randr kanshi
+xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
+
+# Used by ~/.config/labwc/rc.xml keybinds
+pulseaudio-utils grim slurp swappy lxterminal
+
+# Used by ~/.config/waybar/config buttons
+wofi thunar pulsemixer
+
+# Audio (pactl/pulsemixer/waybar pulseaudio module need a pulse server)
+pipewire pipewire-pulse wireplumber
+
+# Privilege prompts from the desktop
+polkitd lxpolkit
+
+# Fonts/icons waybar's glyphs come from
+# (librsvg2-common = SVG image loader: waybar launcher icons are Adwaita .svg backgrounds)
+fonts-noto-color-emoji fonts-font-awesome adwaita-icon-theme librsvg2-common
+# Symbol glyphs terminal apps (claude, pi, prompts) use, same set as the build host
+fonts-symbola fonts-cantarell

@@ -1,0 +1,13 @@
+#!/bin/bash
+# Run the dpkg file triggers activated by the addons' files, after every
+# 00-postinst-* hook. Each addon lists them in /scripts/postinst.d/triggers.<image>
+# as "<handler package> <watched path>"; the handler's postinst rebuilds the
+# cache over the merged view of all layers (GSettings schemas, gdk-pixbuf
+# loaders, fontconfig, MIME/desktop databases, icon caches, dbus config, ...).
+cat /scripts/postinst.d/triggers.* 2>/dev/null | sort -u | awk '
+	{ t[$1] = ($1 in t) ? t[$1] " " $2 : $2 }
+	END { for (p in t) print p, t[p] }' |
+while read -r PKG PATHS; do
+	/scripts/postinst-run "$PKG" triggered $PATHS
+done
+exit 0

@@ -1,0 +1,40 @@
+#!/bin/bash
+# Mount the podman disk and bind container storage onto it, then hand the compose
+# stacks to restartos-podman.service (runs after the network is up, no time limit).
+
+source /etc/podman.conf
+
+case "$ENABLED" in 1|yes|true) ;; *) exit 0 ;; esac
+
+mkdir -p "$FOLDER"
+
+COUNT=0
+while [ ! -b "$DEVICE" ] && [ $COUNT -lt 30 ]; do
+	echo "[Podman] Waiting for device $DEVICE"
+	COUNT=$((COUNT+1))
+	sleep 1
+done
+
+if ! mountpoint -q "$FOLDER"; then
+	mount "$DEVICE" "$FOLDER" -o noatime || exit 0
+fi
+
+/scripts/install-podman "$FOLDER"
+
+if [ ! -d "$FOLDER/Downloads" ]; then
+	mkdir "$FOLDER/Downloads"
+	chown restartos:restartos "$FOLDER/Downloads"
+fi
+if [ ! -d /home/restartos/Downloads ]; then
+	mkdir /home/restartos/Downloads
+	chown restartos:restartos /home/restartos/Downloads
+fi
+mountpoint -q /home/restartos/Downloads || mount -o bind "$FOLDER/Downloads" /home/restartos/Downloads
+
+# rootless needs restartos' systemd user session (XDG_RUNTIME_DIR, user dbus)
+if [ "$TYPE" != "root" ]; then
+	loginctl enable-linger restartos
+fi
+
+systemctl start --no-block restartos-podman.service
+exit 0

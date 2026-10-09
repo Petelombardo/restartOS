@@ -1,0 +1,2 @@
+# restartOS 15 chromium addon (sits on system.img + static-addons-labwc.img)
+chromium

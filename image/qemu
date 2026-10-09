@@ -1,0 +1,171 @@
+#!/bin/bash
+# Boot a built restartOS image under QEMU/KVM with its serial console in this terminal.
+# Run it from a board folder (symlink it in like ./make). It reads ./config to find
+# /builds/restartOS-$CUSTOMNAME[-test].img, pulls the kernel and initrd that U-Boot
+# would load (boot/Image, boot/uInitrd) out of the image, and boots the image itself
+# as a virtio disk. The image is never modified (snapshot=on). No root needed.
+#
+# usage: ./qemu [options] [image]
+#   -i FILE   use this initrd instead of the one inside the image (plain or uInitrd)
+#   -k FILE   use this kernel Image instead of the one inside the image
+#   -m MB     guest RAM (default 4096)
+#   -a ARGS   extra kernel command line arguments
+#   -l FILE   headless: write the console to FILE instead of the terminal
+#   -t SECS   headless only: stop after SECS (default 90)
+#   -g        graphics: virtio GPU + keyboard/mouse. Opens a window (needs the
+#             qemu-system-gui package; otherwise VNC on localhost:5901)
+#   -S FILE   headless + -g: save a PNG screenshot to FILE just before stopping
+#   -x FILE   headless: wait for the serial console's shell prompt, run each line
+#             of FILE as a command, print the output, then stop (log still in -l)
+# Quit the console with Ctrl-A then X.
+set -e
+
+INITRD_OVERRIDE=""
+KERNEL_OVERRIDE=""
+MEM=4096
+EXTRA=""
+LOG=""
+TIMEOUT=90
+GFX=0
+SHOT=""
+CMDS=""
+while getopts "i:k:m:a:l:t:gS:x:" o; do
+	case $o in
+		i) INITRD_OVERRIDE=$OPTARG ;; k) KERNEL_OVERRIDE=$OPTARG ;; m) MEM=$OPTARG ;; a) EXTRA=$OPTARG ;;
+		l) LOG=$OPTARG ;; t) TIMEOUT=$OPTARG ;;
+		g) GFX=1 ;; S) SHOT=$(realpath -m "$OPTARG") ;; x) CMDS=$(realpath "$OPTARG") ;;
+		*) sed -n '2,21p' "$0"; exit 1 ;;
+	esac
+done
+shift $((OPTIND-1))
+
+TESTBUILD=0
+[ -f ./config ] && source ./config
+[ "$TESTBUILD" -eq 1 ] && CUSTOMNAME="${CUSTOMNAME}-test"
+IMG=${1:-/builds/restartOS-$CUSTOMNAME.img}
+[ -f "$IMG" ] || { echo "No image at '$IMG' (run from a board folder, or pass the image path)"; exit 1; }
+
+PATH=$PATH:/usr/sbin:/sbin
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+
+# Locate the first partition (or the whole image, if it has no partition table)
+# and read files straight out of it with debugfs
+START=$(sfdisk -J "$IMG" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["partitiontable"]["partitions"][0]["start"])' 2>/dev/null || echo 0)
+FS="$IMG?offset=$((START*512))"
+fs() { debugfs -R "$1" "$FS" 2>/dev/null; }
+resolve() {     # follow a symlink inside /boot one level
+	local dest
+	dest=$(fs "stat $1" | sed -n 's/^Fast link dest: "\(.*\)"$/\1/p')
+	[ -n "$dest" ] && echo "$(dirname "$1")/$dest" || echo "$1"
+}
+
+if [ -n "$KERNEL_OVERRIDE" ]; then
+	KERNEL=$KERNEL_OVERRIDE
+	cp "$KERNEL" "$T/Image"
+else
+	KERNEL=$(resolve /boot/Image)
+	fs "dump $KERNEL $T/Image" >/dev/null
+fi
+echo "== Kernel: $KERNEL"
+[ -s "$T/Image" ] || { echo "Could not read $KERNEL from $IMG"; exit 1; }
+
+if [ -n "$INITRD_OVERRIDE" ]; then
+	INITRD_SRC=$INITRD_OVERRIDE
+	cp "$INITRD_SRC" "$T/initrd.raw"
+else
+	INITRD_SRC=$(resolve /boot/uInitrd)
+	fs "dump $INITRD_SRC $T/initrd.raw" >/dev/null
+fi
+echo "== Initrd: $INITRD_SRC"
+case "$(od -An -tx1 -N4 "$T/initrd.raw" | tr -d ' ')" in
+	27051956) tail -c +65 "$T/initrd.raw" > "$T/initrd" ;;     # strip the 64-byte U-Boot header
+	1f8b*|28b52ffd|30373037) mv "$T/initrd.raw" "$T/initrd" ;; # gzip / zstd / plain cpio
+	*) echo "ERROR: $INITRD_SRC is neither a uInitrd nor a gzip/zstd/cpio initrd (corrupt or truncated?)"; exit 1 ;;
+esac
+
+# Use the same extra kernel args the board would get from armbianEnv.txt
+ENVARGS=$(fs "cat /boot/armbianEnv.txt" | sed -n 's/^\(extraargs\|extraboardargs\)=//p' | tr '\n' ' ')
+CMDLINE="console=ttyAMA0 $ENVARGS $EXTRA"
+echo "== Image:  $IMG"
+echo "== Cmdline: $CMDLINE"
+
+QEMU=(qemu-system-aarch64 -M virt -accel kvm -cpu host -smp 4 -m "$MEM"
+	-kernel "$T/Image" -initrd "$T/initrd" -append "$CMDLINE"
+	-drive "file=$IMG,if=virtio,format=raw,snapshot=on"
+	-netdev user,id=n0 -device virtio-net-pci,netdev=n0,romfile=)
+
+[ $GFX -eq 1 ] && QEMU+=(-device virtio-gpu-pci -device virtio-keyboard-pci -device virtio-tablet-pci)
+
+if [ -z "$LOG" ]; then
+	if [ $GFX -eq 0 ]; then
+		echo "== Booting (Ctrl-A then X to quit)"
+		"${QEMU[@]}" -nographic
+	elif qemu-system-aarch64 -display help 2>/dev/null | grep -qx gtk; then
+		echo "== Booting: desktop in a window, serial console here (Ctrl-A then X to quit)"
+		"${QEMU[@]}" -display gtk -serial mon:stdio
+	else
+		echo "== Booting: no GUI display in this QEMU (sudo apt install qemu-system-gui)."
+		echo "   Desktop is on VNC: localhost:5901. Serial console here (Ctrl-A then X to quit)"
+		"${QEMU[@]}" -display none -vnc 127.0.0.1:1 -serial mon:stdio
+	fi
+elif [ -n "$CMDS" ]; then
+	echo "== Booting headless, running $(grep -c . "$CMDS") command(s) from $CMDS (log -> $LOG)"
+	"${QEMU[@]}" -display none -serial "unix:$T/ser,server,nowait" -monitor "unix:$T/mon,server,nowait" &
+	PID=$!
+	sleep 1
+	python3 - "$T/ser" "$T/mon" "$CMDS" "$LOG" "$TIMEOUT" "$SHOT" <<'PY'
+import re, socket, sys, time
+ser_path, mon_path, cmds, log, timeout, shot = sys.argv[1:7]
+ser = socket.socket(socket.AF_UNIX); ser.connect(ser_path); ser.settimeout(1)
+out = open(log, 'wb'); buf = b''
+def read_until(pat, limit):
+    global buf
+    end = time.time() + limit
+    while time.time() < end:
+        try:
+            d = ser.recv(65536)
+        except socket.timeout:
+            d = b''
+        if d:
+            out.write(d); out.flush(); buf += d
+            m = re.search(pat, buf)
+            if m:
+                got, buf = buf[:m.end()], buf[m.end():]
+                return got
+    return None
+PROMPT = rb'[\w-]+@[\w-]+:[^\n]*[$#] $'
+if read_until(PROMPT, int(timeout)) is None:
+    print('!! no shell prompt on the serial console within', timeout, 's'); sys.exit(1)
+time.sleep(2)
+for line in open(cmds):
+    line = line.rstrip('\n')
+    if not line.strip() or line.lstrip().startswith('#'):
+        continue
+    ser.sendall(line.encode() + b'\n')
+    got = read_until(PROMPT, 120) or b'(timed out)'
+    text = got.decode(errors='replace').replace('\r', '')
+    text = re.sub(r'\x1b\[[0-9;?]*[A-Za-z]', '', text)
+    print('$ ' + line); print('\n'.join(text.split('\n')[1:-1]))
+mon = socket.socket(socket.AF_UNIX); mon.connect(mon_path); time.sleep(0.3); mon.recv(65536)
+if shot:
+    mon.sendall(f'screendump {shot} -f png\n'.encode()); time.sleep(2)
+mon.sendall(b'quit\n'); time.sleep(0.5)
+PY
+	wait $PID 2>/dev/null || true
+elif [ $GFX -eq 1 ] && [ -n "$SHOT" ]; then
+	echo "== Booting headless for ${TIMEOUT}s -> $LOG, screenshot -> $SHOT"
+	"${QEMU[@]}" -display none -serial "file:$LOG" -monitor "unix:$T/mon,server,nowait" &
+	PID=$!
+	sleep "$TIMEOUT"
+	python3 - "$T/mon" "$SHOT" <<'PY'
+import socket, sys, time
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); time.sleep(0.5); s.recv(65536)
+s.sendall(f'screendump {sys.argv[2]} -f png\n'.encode()); time.sleep(2)
+s.sendall(b'quit\n'); time.sleep(0.5)
+PY
+	wait $PID 2>/dev/null || true
+else
+	echo "== Booting headless for ${TIMEOUT}s -> $LOG"
+	timeout "$TIMEOUT" "${QEMU[@]}" -display none -serial "file:$LOG" -monitor none || true
+fi

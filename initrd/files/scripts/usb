@@ -1,0 +1,43 @@
+mountroot()
+{
+	echo "Loading /scripts/usb"
+	modprobe uhci-hcd
+	sleep 1
+	modprobe ehci-hcd
+	sleep 1
+	modprobe ohci-hcd
+	modprobe ahci
+	modprobe usb-storage
+	modprobe ext2
+	modprobe ext3
+	modprobe ext4
+	
+        COUNT=0
+        TIMEOUT=30
+        while [ $COUNT -lt $TIMEOUT ]
+        do
+                echo "Searching for restartOS ($COUNT of $TIMEOUT)"
+                DRIVE=$(find-linux)
+                COUNT=$((COUNT+1))
+                if [ ! "$DRIVE" == "" ]; then
+                        break
+                fi
+                sleep 1
+        done
+
+	mkdir -p /drive
+	mount -t auto $DRIVE /drive || mount -t auto UUID=2FA0-F622 /drive || mount -t auto LABEL=restartos /drive || mount -t auto /dev/mmcblk1p1 /drive || echo "ERROR: COULD NOT MOUNT RESTARTOS...  "
+#	mount -t auto UUID=bfc78250-6182-4e41-818f-b5f9b4d6c0ba /drive || mount -t auto LABEL=restartos /drive
+	SIZE=`/bin/get-memory-default`
+	mount tmpfs ${rootmnt} -t tmpfs -o noatime,size=$SIZE
+	/bin/sed -i /scripts/cdromfiles/fstab -e "s/size/size="$SIZE",noatime/"
+	TOTALMEM=`/bin/totalmem`
+	echo "Totalmem: $TOTALMEM"
+	echo "System Mem: $SIZE"
+	if [ "$TOTALMEM" == "" ]; then
+	        TOTALMEM=0
+	fi
+	source /scripts/loadsystem
+	source	/scripts/common
+}
+

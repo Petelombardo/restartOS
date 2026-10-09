@@ -1,0 +1,34 @@
+#!/bin/bash
+PATH=$PATH:/usr/bin:/usr/sbin:/sbin:/bin
+
+# No longer needed since systemd handles this for all interfaces already
+#exit 0
+
+
+FOUND=0
+while [ $FOUND -eq 0 ]
+do
+	FOUND=$(find /sys/class/net/* | grep -v "lo" | wc -l)
+	if [ $FOUND -eq 0 ]; then
+		sleep 1
+	fi
+done
+
+for i in $(find /sys/class/net/* -maxdepth 0 | grep -v "lo")
+do
+	INTERFACE=$(basename $i)
+	echo $INTERFACE >> /var/log/networking.log
+	NEWNAME=$(udevadm test-builtin net_id /sys/class/net/$INTERFACE 2>/dev/null | grep "NAME_SLOT" | cut -d'=' -f2)
+#	echo "auto $INTERFACE" >> /etc/network/interfaces
+#	echo "iface $INTERFACE inet dhcp" >> /etc/network/interfaces
+#	echo "" >> /etc/network/interfaces
+# NOT NEEDED SINCE SYSTEMD-NETWORKD.SERVICE HANDLES BRINGING UP THE INTERFACES
+	UP=$(ip addr | grep "inet " | grep -v "127.0.0.1" | wc -l)
+	if [ $UP -eq 0 ]; then
+		dhclient -nw -4 $INTERFACE
+#		ifup $INTERFACE
+	fi
+done
+find /sys/class/net/*  | grep -v 'lo' | wc -l
+
+exit 0

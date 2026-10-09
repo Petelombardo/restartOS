@@ -1,0 +1,12 @@
+[Unit]
+Description=restartOS Shutdown Scripts
+After=network.target local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/scripts/restartos-stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

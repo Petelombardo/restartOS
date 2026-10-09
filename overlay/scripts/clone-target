@@ -1,0 +1,168 @@
+#!/bin/bash
+IFS="
+"
+alias nc=/usr/bin/nc.traditional
+count=0
+bold=$(tput bold)
+normal=$(tput sgr0)
+COMPRESSED=0
+
+disable_zram () {
+	if [ $(swapon -s | grep zram | wc -l) -gt 0 ]; then
+		ZRAM_ENABLED=1
+		swapoff -a
+#		service zram stop
+	else
+		ZRAM_ENABLED=0
+	fi
+}
+
+enable_zram() {
+	if [ $ZRAM_ENABLED -eq 1 ]; then
+#		service zram start
+		swapon -a
+	fi
+}
+
+
+set_lport () {
+        LPORT=1235
+        while [ `ss -4na | grep ":$LPORT" | sed -e 's/  */,/g' | cut -d',' -f5 | wc -l` -gt 0 ]
+        do
+                LPORT=$((LPORT+1))
+        done
+}
+
+disable_zram
+
+echo    "ID     Option Type"
+echo    "1      Disk"
+echo    "2      Partition"
+echo    "3      MBR"
+echo    "4      File"
+echo -n "Type the ID of the type of clone that you wish to perform [1]: "
+read option
+
+case $option in
+1)
+        type="disk"
+        ;;
+2)
+        type="partition"
+        ;;
+3)
+        type="MBR"
+        ;;
+4)
+	type="file"
+	;;
+*)
+        type="disk"
+        ;;
+esac
+
+echo ""
+echo "ID        $type"
+if [ "$type" == "partition" ]; then
+        for i in `lsblk -e 7 -e 11 -l | grep "part" | sed -e 's/^\([a-z]*[0-9]*\) * [0-9]*:[0-9]* *[0-9] *\([0-9\.GMK]*\) .*/\1 \2/' | sort`
+        do
+                count=$((count+1))
+                echo "$count    $i"
+                disks="$disks"$'\n'"$count $i"
+        done
+elif [ "$type" == "file" ]; then
+	echo "Enter a file name to save to."
+	read filename
+else
+        for i in `lsblk -l -e 7 -e 11 | grep "disk" | sed -e 's/  */ /g' | grep -v "NAME" | cut -d' ' -f1,4 | sort`
+        do
+                count=$((count+1))
+                echo "$count    $i"
+                disks="$disks"$'\n'"$count $i"
+        done
+fi
+
+if [ ! "$type" == "file" ]; then
+	echo ""
+	echo -n "Type the ID matching the $type that you wish to ${bold}overwrite${normal}: "
+	read disknum
+	disk=`echo "$disks" | grep "^$disknum " | cut -d' ' -f2`
+	if [ "$disk" == "" ]; then
+		echo "Sorry, but that is not a valid selection. Exiting."
+		exit
+	fi
+fi
+
+if [ "$type" == "file" ]; then
+        destination="$filename"
+else
+        destination="/dev/$disk"
+fi
+
+echo -n "Ready to overwrite $type ${bold}$destination${normal}? [n]: "
+read choice
+if [ ! "$choice" == "y" ] && [ ! "$choice" == "Y" ] && [ ! "$choice"  == "yes" ]; then
+	echo "Action Aborted"
+	exit
+fi
+IP=`ip addr | grep "inet " | grep -v "127.0.0.1" | sed -e 's/^ *//' | cut -d' ' -f2 | cut -d'/' -f1 | grep "" -m1`
+BCAST=`ip addr | grep "inet.*brd" | sed -e 's/^.*brd \([0-9\.]*\) scope.*$/\1/' | grep "" -m1`
+BCASTLO="127.255.255.255"
+GO=1
+
+set_lport; # Sets the listening port and increments from 1235 until it finds a port that's open
+
+echo "Listening on IP:PORT ${bold}$IP:$LPORT${normal}."
+echo "Waiting for handshake with origin server."
+
+SIZESTRING=""
+
+while [ "$RESULT" == "" ]
+do
+	echo "$IP:$LPORT" 2> /dev/null |  nc -u -b -w1 $BCAST 1234 > /dev/null 2>&1 &
+	echo "127.0.0.1:$LPORT" 2> /dev/null | nc -u -b -w1 $BCASTLO 1234 > /dev/null 2>&1 &
+	echo -n "."
+	go=0
+	count=0
+	RESULT=`nc -l -p $LPORT -w5 -q2 2> /dev/null | sed -e 's/\n//'`
+	if [ ! "$RESULT" == "" ] && [ $(echo $RESULT | cut -d':' -f1) -gt 1 ]; then
+		SIZE=$(echo $RESULT | cut -d':' -f1)
+		COMPRESSED=$(echo $RESULT | cut -d':' -f2)
+		if [ ! "$COMPRESSED" == "0" ] && [ ! "$COMPRESSED" == "1" ]; then
+			COMPRESSED=1
+		fi
+		if [ $COMPRESSED -eq 1 ] && [ "$type" == "file" ]; then
+        		if [ ! $(echo $destination | grep '\.lz4' | wc -l) -eq 1 ]; then
+                		destination+=".lz4"
+        		fi
+		fi
+		SIZESTRING="-s $SIZE"
+		GO=0
+		echo ""
+	fi
+done
+
+echo "Receiving size: $SIZE; Compressed: $COMPRESSED"
+
+umount /dev/${disk}* > /dev/null 2>&1
+udevadm control -s
+
+if [ "$type" == "MBR" ]; then
+	nc -l -p $LPORT | lz4 -d | sudo dd of=$destination
+else
+	if [ "$COMPRESSED" == "1" ] && [ ! "$type" == "file" ]; then
+		nc -l -p $LPORT | lz4 -d | pv -btearp -B 4194304 -N "TARGET LZ4" $SIZESTRING > $destination
+		STATUS=$?
+	else
+		nc -l -p $LPORT | pv -btearp -B 4194304 -N TARGET $SIZESTRING > $destination
+		STATUS=$?
+	fi
+fi
+udevadm control -S
+
+if [ ! "$STATUS" == "0" ]; then
+	echo "ERROR"
+	read nothing
+fi
+
+enable_zram

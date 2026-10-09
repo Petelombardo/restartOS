@@ -1,0 +1,62 @@
+#!/bin/bash
+# Build the restartOS initrd for a kernel with mkinitramfs, run inside a minimal
+# Debian trixie build root (so the build host needs neither initramfs-tools nor
+# busybox, and the initrd's udev/kmod/glibc match the trixie base image).
+#
+# usage: sudo ./build-initrd <kernel version> [output]
+#   modules: /builds/system-modules-<kver>/usr/lib/modules/<kver> (the same tree
+#            the system-modules image is made from), else /lib/modules/<kver>
+#   output:  ./initrd-<kver>.img
+#   MODULES_DIR=... overrides the modules location.
+#   BUILDROOT=...   the build root (default /builds/initrd-buildroot); created with
+#                   debootstrap on first use, reused (and apt-upgraded) after that.
+#   MIRROR=...      Debian mirror for debootstrap (default deb.debian.org).
+set -e
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+KVER=$1
+[ -n "$KVER" ] || { sed -n '2,15p' "$0"; exit 1; }
+OUT=$(realpath -m "${2:-initrd-$KVER.img}")
+BUILDROOT=${BUILDROOT:-/builds/initrd-buildroot}
+MIRROR=${MIRROR:-http://deb.debian.org/debian}
+if [ -z "$MODULES_DIR" ]; then
+	MODULES_DIR=/builds/system-modules-$KVER/usr/lib/modules/$KVER
+	[ -d "$MODULES_DIR" ] || MODULES_DIR=/lib/modules/$KVER
+fi
+MODULES_DIR=$(realpath "$MODULES_DIR")
+[ -f "$MODULES_DIR/modules.order" ] || { echo "No kernel modules for $KVER at $MODULES_DIR"; exit 1; }
+[ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo $0 ...)"; exit 1; }
+
+if [ ! -x "$BUILDROOT/usr/sbin/mkinitramfs" ]; then
+	command -v debootstrap > /dev/null || { echo "debootstrap is needed for the build root: apt install debootstrap"; exit 1; }
+	echo "== Creating the build root $BUILDROOT (debootstrap trixie, once)"
+	debootstrap --variant=minbase \
+		--include=initramfs-tools,busybox,pv,util-linux,kmod,udev,zstd \
+		trixie "$BUILDROOT" "$MIRROR"
+fi
+
+# Bind what the build needs into the build root; always unbind on exit (never
+# delete the build root while anything is still bound into it).
+MOUNTS=()
+bind() {   # bind <src> <dst inside build root> [ro]
+	mkdir -p "$BUILDROOT$2"
+	mount --bind "$1" "$BUILDROOT$2"
+	MOUNTS=("$BUILDROOT$2" "${MOUNTS[@]}")
+	[ "$3" = ro ] && mount -o remount,bind,ro "$BUILDROOT$2"
+	return 0
+}
+cleanup() { for m in "${MOUNTS[@]}"; do umount "$m" 2>/dev/null || umount -l "$m"; done; }
+trap cleanup EXIT
+
+mkdir -p "$(dirname "$OUT")"
+bind /proc /proc
+bind /sys /sys
+bind /dev /dev
+bind "$HERE" /recipe ro
+bind "$MODULES_DIR" "/usr/lib/modules/$KVER" ro
+bind /usr/lib/firmware /usr/lib/firmware ro
+bind "$(dirname "$OUT")" /out
+cp -L /etc/resolv.conf "$BUILDROOT/etc/resolv.conf"
+
+echo "== Building $OUT from $MODULES_DIR"
+chroot "$BUILDROOT" /bin/sh /recipe/build-in-root "$KVER" "$(basename "$OUT")"
+ls -la "$OUT"

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+for i in `find /scripts/startup -type f | sort`
+do
+	echo "" >> /var/log/restartos.log
+	echo $(date) >> /var/log/restartos.log
+	echo "Processing $i" >> /var/log/restartos.log
+	/bin/bash $i >> /var/log/restartos.log 2>&1
+done
+
+ldconfig &
+
+exit 0

@@ -1,0 +1,13 @@
+# restartOS 15 podman addon: podman + podman-compose (root and rootless).
+# Dependencies already in system.img are skipped automatically by create-package.
+podman podman-compose
+# rootless: restartos user session bus (systemd cgroups for rootless containers)
+dbus-user-session
+
+# podman's Recommends that make it work out of the box (apt skipped them on the host):
+#   passt         - pasta, podman 5's default rootless network
+#   uidmap        - setuid newuidmap/newgidmap for rootless user namespaces (/etc/subuid in overlay)
+#   catatonit     - init for `podman run --init` / pods
+#   aardvark-dns  - container name DNS on compose networks (services reach each other by name)
+#   nftables      - netavark's firewall backend (iptables is already in the base)
+passt uidmap catatonit aardvark-dns nftables

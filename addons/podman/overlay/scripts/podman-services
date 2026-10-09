@@ -1,0 +1,16 @@
+#!/bin/bash
+# restartos-podman.service: start|stop FOLDER/podman/control-everything as
+# root or as restartos (rootless), per /etc/podman.conf.
+
+source /etc/podman.conf
+CTL="$FOLDER/podman/control-everything"
+[ -x "$CTL" ] || { echo "$CTL missing (is $FOLDER mounted?)"; exit 0; }
+
+if [ "$TYPE" == "root" ]; then
+	exec "$CTL" "$1"
+fi
+
+uid=$(id -u restartos)
+for i in $(seq 30); do [ -S /run/user/$uid/bus ] && break; sleep 1; done
+exec runuser -u restartos -- env XDG_RUNTIME_DIR=/run/user/$uid \
+	DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus HOME=/home/restartos "$CTL" "$1"

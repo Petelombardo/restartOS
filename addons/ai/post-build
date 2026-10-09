@@ -1,0 +1,20 @@
+# Copies Claude Code and pi from the build host's user installs into the addon.
+# Runs as root from build-addon with $DEST set.
+. "$(dirname "$(readlink -f "$0")")/../../scripts/restartos-env" 2>/dev/null || . /builds/minimal-system/scripts/restartos-env
+# Claude Code and pi are copied from this user's installs (local.conf AI_SRC_HOME,
+# default: whoever ran sudo)
+SRC_HOME=${AI_SRC_HOME:-$(getent passwd "${SUDO_USER:-$USER}" | cut -d: -f6)}
+
+echo "   claude $("$SRC_HOME/.local/bin/claude" --version 2>/dev/null)"
+install -D -m 755 "$(readlink -f "$SRC_HOME/.local/bin/claude")" "$DEST/opt/claude/claude"
+
+echo "   pi $(cat "$SRC_HOME/.pi/agent/install/current-version") + node $(readlink -f "$SRC_HOME/.local/share/pi-node/current" | sed -e 's/.*node-//')"
+mkdir -p "$DEST/opt/pi/agent"
+cp -a "$SRC_HOME/.pi/agent/bin" "$SRC_HOME/.pi/agent/install" "$DEST/opt/pi/agent/"
+rm -rf "$DEST/opt/pi/agent/install/staging"
+sed -i -e "s#$SRC_HOME/.pi/agent/bin/pi#/opt/pi/agent/bin/pi#" "$DEST/opt/pi/agent/install/managed-install.json"
+cp -a "$(readlink -f "$SRC_HOME/.local/share/pi-node/current")" "$DEST/opt/pi/node"
+chown -R root:root "$DEST/opt/claude" "$DEST/opt/pi"
+
+# No user config: pi starts unconfigured (no settings.json, models.json, auth or
+# packages from the build host); set it up on the device and make it persistent.

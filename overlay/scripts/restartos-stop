@@ -1,0 +1,9 @@
+#!/bin/bash
+
+for i in `find /scripts/shutdown -type f | sort`
+do
+	echo "Processing $i" >> /var/log/restartos.log
+	/bin/bash $i >> /var/log/restartos.log 2>&1
+done
+
+exit 0

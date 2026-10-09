@@ -1,0 +1,153 @@
+#!/bin/bash
+
+PATH=$PATH:/usr/bin:/bin:/usr/sbin:/sbin
+
+BOOT=$(cat /proc/cmdline | sed -e 's/^.*root=\([A-Z]*\).*$/\1/')
+
+#VERSION=11
+VERSION=$(cat /mnt/boot/version | cut -d'.' -f1)
+
+bold=$(tput bold)
+normal=$(tput sgr0)
+
+ARGS=$(echo "$@" | sed -e 's/^'$1' //')
+
+if [ ! "`whoami`" == "root" ]; then
+	echo "You must run this command as root.  Try running this again with ${bold}sudo${normal}."
+	exit
+fi
+
+if [ "$1" == "" ] || (( [ "$1" == "install" ] || [ "$1" == "uninstall" ] ) && [ "$2" == "" ] ); then
+	echo "Usage package list|install|uninstall|upgrade [package-name]";
+	exit
+fi
+
+mount_drive() {
+	mounted=0
+	DEVICEPATH=`blkid | grep -E "2FA0-F622|restartos" | cut -d':' -f1`
+	ISMOUNTEDALREADY=`mount | grep "^$DEVICEPATH" | grep " /mnt/system " | wc -l`
+	if [ $ISMOUNTEDALREADY -eq 1 ]; then
+		mounted=1
+	fi
+	if [ $mounted -eq 0 ]; then
+	       mount UUID=2FA0-F622 /mnt/system 2> /dev/null || mount LABEL=restartos /mnt/system 2> /dev/null || error=1
+	fi
+        if [ "$error" == "1" ]; then
+                echo "Error mounting the boot media."
+                exit
+        fi
+}
+
+mount_overlays() {
+	if [ $(mount | grep tmpfs | grep /tmp/overlays | wc -l) -eq 0 ]; then
+		mkdir -p /tmp/overlays
+		mount -t tmpfs none /tmp/overlays
+	fi
+	mkdir -p /tmp/overlays/system
+	mkdir -p /tmp/overlays/workdir
+	if [ $(mount | grep /mnt/system | grep "overlay" | wc -l) -eq 0 ]; then
+		mount -t overlay overlay -o lowerdir=/mnt/cdrom,upperdir=/tmp/overlays/system,workdir=/tmp/overlays/workdir /mnt/system
+	fi
+}
+
+mount_cdrom() {
+	mounted=0
+	DEVICEPATH="/dev/sr0"
+	ISMOUNTEDALREADY=`mount | grep "^$DEVICEPATH" | grep " /mnt/cdrom " | wc -l`
+	if [ $ISMOUNTEDALREADY -eq 1 ]; then
+		mounted=1
+	fi
+	if [ $mounted -eq 0 ]; then
+	      	mount $DEVICEPATH /mnt/cdrom || error=1
+		mount_overlays
+	fi
+        if [ "$error" == "1" ]; then
+                echo "Error mounting the boot media."
+                exit
+        fi
+}
+
+
+unmount_drive() {
+	umount /mnt/system
+}
+
+
+case $1 in
+
+install)
+	if [ "$BOOT" == "CDROM" ]; then
+		mount_cdrom
+		mount_overlays
+	else
+		mount_drive
+	fi
+	for i in `echo "$ARGS"`
+	do
+		if [ ! "$i" == "" ]; then
+			wget -q --show-progress http://www.restartos.com/$VERSION/static-addons-$i.img -O - | pv > /mnt/system/static-addons-$i.img 2> /dev/null || error=1
+			mkdir /mnt/static-addons-$i
+			mount -o loop /mnt/system/static-addons-$i.img /mnt/static-addons-$i
+			/scripts/live-install /mnt/static-addons-$i
+			find /mnt/static-addons-$i/scripts/live -type f -exec bash {} \;
+
+			if [ "$error" == "1" ]; then
+				echo "Error downloading package $i"
+				exit
+			fi
+			echo ${bold}$i${normal} is now installed
+		fi
+	done
+	if [ "$BOOT" != "CDROM" ]; then
+		unmount_drive
+	fi
+	;;
+list)
+	if [ "$BOOT" == "CDROM" ]; then
+		mount_cdrom
+		mount_overlays
+	else
+		mount_drive
+	fi
+	echo "${bold}Installed Packages${normal}"
+	INSTALLED=""
+	for package in `ls /mnt/system/*.img | sed -e 's/\/mnt\/system\///' | grep -vE "^system|initrd|vmlinuz|kernel" | sed -e 's/\.img//' | sed -e 's/static-addons-//'`
+	do
+		echo $package
+		INSTALLED+=`echo $package`
+	done
+	echo
+	echo "${bold}Installable Packages${normal}"
+	for package in `wget http://www.restartos.com/$VERSION/file-list.md5 -O - 2> /dev/null | cut -d' ' -f3 | grep -v "^system" | sed -e 's/\.img//' | grep -v "static-addons-persistent" | sed -e 's/static-addons-//'`
+	do
+		if [ ! $(echo $package | grep -E "^system|initrd|vmlinuz|kernel|version|restartOS" | wc -l) -gt 0 ] && [ ! `echo $INSTALLED | grep $package | wc -l` -eq 1 ]; then
+			echo $package
+		fi
+	done
+	if [ "$BOOT" != "CDROM" ]; then
+		unmount_drive
+	fi
+	;;
+delete*|remove*|uninstall*)
+	if [ "$BOOT" == "CDROM" ]; then
+		mount_cdrom
+		mount_overlays
+	else
+		mount_drive
+	fi
+	for i in `echo "$ARGS"`
+	do
+		if [ -f /mnt/system/static-addons-$i.img ]; then
+			echo "Uninstalling ${bold}$i${normal}"
+			rm /mnt/system/static-addons-$i.img || echo "Error uninstalling ${bold}$i${normal}"
+		else
+			echo "${bold}Error:${normal}  Package ${bold}$i${normal} not found on this system."
+		fi
+	done
+	unmount_drive
+	;;
+upgrade)
+	/usr/bin/upgrade
+	;;
+esac
+

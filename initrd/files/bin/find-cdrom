@@ -1,0 +1,16 @@
+#!/bin/sh
+
+#CDROM="`/bin/find /proc/sys/dev/cdrom* -name \"info\" | /bin/grep -m 1 \"\"`"
+#DEVICE=`/bin/cat "$CDROM" | /bin/grep "drive name:" | /bin/cut -f2- | /bin/sed -e 's/^.*\([a-z][a-z][a-z][0-9]*\)$/\1/'`
+
+DEVICE=`grep "drive name:" /proc/sys/dev/cdrom/info | /bin/cut -d':' -f2 | /bin/cut -f3,4,5,6,7 --output-delimiter=' ' | sed -e 's/^\([a-z][a-z].\)/\/dev\/\1/' | sed -e 's/ \([a-z][a-z].\)/ \/dev\/\1/g' | sed -e 's/ *$//'`
+if [ ! "$DEVICE" == "" ]; then
+	echo $DEVICE
+#	echo "/dev/$DEVICE"
+fi
+
+if [ -b /dev/disk/by-label/CDROM ]; then
+	echo `readlink -f /dev/disk/by-label/CDROM`
+fi
+
+exit 1

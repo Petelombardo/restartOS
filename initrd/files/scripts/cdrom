@@ -1,0 +1,29 @@
+mountroot()
+{
+	modprobe isofs
+
+	COUNT=0
+	TIMEOUT=30
+	while [ $COUNT -lt $TIMEOUT ]
+	do
+		echo "Searching for CDROM ($COUNT of $TIMEOUT)"
+		RESULT=$(find-cdrom)
+		COUNT=$((COUNT+1))
+		if [ ! "$RESULT" == "" ]; then
+			break
+		fi
+		sleep 1
+	done
+
+	for i in $(echo "$RESULT")
+	do
+		CDROM=$i
+		mkdir -p /drive
+		mount -t auto $CDROM /drive
+		if [ -f /drive/system.img ]; then
+			break
+		fi
+	done
+	sh /scripts/loadsystem
+	sh /scripts/common
+}

@@ -1,0 +1,59 @@
+#!/bin/bash
+if [ "$1" == "" ]; then
+	echo "Flatpak must be installed somewhere on a physical disk in order to run.  All you have to do is mount the disk and then run this script."
+	echo "Usage: install-flatpak /my/mounted/disk/path/"
+fi
+
+function prep_folder () {
+	if [ ! -d $1 ]; then
+	# If the source folder does not exist, create it
+		mkdir -p $1
+		chown restartos:restartos $1
+	fi
+	if [ $(mount | grep $2 | wc -l) -eq 0 ]; then
+		if [ ! -d $2 ]; then
+		# If the destination folder does not exist, create it
+        	        runuser restartos -s /bin/bash -c "mkdir -p $2"
+			if [ ! -d $2 ] && [ -d $(dirname $2) ]; then
+				mkdir $2
+				chown restartos:restartos $2
+			fi
+        	else
+			# If the destination folder does exist, remove it
+        	        rm -rf $2
+        	        runuser restartos -s /bin/bash -c "mkdir -p $2"
+			if [ ! -d $2 ] && [ -d $(dirname $2) ]; then
+				mkdir $2
+				chown restartos:restartos $2
+			fi
+        	fi
+		echo "Mounting: Binding $1 on $2"
+        	mount -o bind "$1" "$2"
+	else
+		echo "$1 already mounted to $2"
+	fi
+}
+
+
+rm -rf /var/lib/flatpak/repo
+rm -rf /var/lib/flatpak/runtime
+prep_folder ${1}/var/lib/flatpak/repo /var/lib/flatpak/repo
+prep_folder ${1}/var/lib/flatpak/runtime /var/lib/flatpak/runtime
+
+if [ ! -f /var/lib/flatpak/repo/config ]; then
+	echo "[core]
+repo_version=1
+mode=bare-user-only
+min-free-space-size=500MB
+" > /var/lib/flatpak/repo/config
+fi
+
+for i in extensions objects refs refs/heads refs/mirrors refs/remotes state tmp tmp/cache
+do
+	if [ ! -d /var/lib/flatpak/repo/$i ]; then
+		mkdir -p /var/lib/flatpak/repo/$i
+	fi
+done
+
+
+

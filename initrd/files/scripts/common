@@ -1,0 +1,4 @@
+cp /drive/version ${rootmnt}/etc/
+cp /drive/changelog ${rootmnt}/etc/
+
+umount /drive

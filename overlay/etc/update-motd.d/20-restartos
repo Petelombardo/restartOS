@@ -1,0 +1,54 @@
+#!/bin/bash
+
+if [ "$TERM" == "" ] || [ "$TERM" == "dumb" ]; then
+	export TERM=linux
+fi
+
+bold=$(tput bold)
+normal=$(tput sgr0)
+yellow=$(tput setaf 3)
+cyan=$(tput setaf 6)
+magenta=$(tput setaf 5)
+red=$(tput setaf 1)
+green=$(tput setaf 2)
+blue=$(tput setaf 4)
+
+SHOW_IP_PATTERN="^[ewr].*|^br.*|^lt.*|^umts.*"
+
+function get_ip_addresses() {
+	# Cherry picked function from Armbian OS
+        local ips=()
+        for f in /sys/class/net/*; do
+                local intf=$(basename $f)
+                # match only interface names starting with e (Ethernet), br (bridge), w (wireless), r (some Ralink drivers use ra<$
+                if [[ $intf =~ $SHOW_IP_PATTERN ]]; then
+                        local tmp=$(ip -4 addr show dev $intf | awk '/inet/ {print $2}' | cut -d'/' -f1)
+                        # add both name and IP - can be informative but becomes ugly with long persistent/predictable device names
+                        #[[ -n $tmp ]] && ips+=("$intf: $tmp")
+                        # add IP only
+                        [[ -n $tmp ]] && ips+=("$tmp")
+                fi
+        done
+        for ip in ${ips[@]}
+	do
+		echo -n "$ip "
+	done
+	echo ""
+} # get_ip_addresses
+
+echo
+echo "${red}restartOS $(cat /mnt/boot/version)${normal}."
+echo -n "	Your IP address is ${yellow}"
+get_ip_addresses
+echo -n "${normal}"
+if [ -f /usr/bin/weston ] && [ "$(pidof weston)" == "" ]; then
+	echo "	To start the GUI, type ${green}weston${normal}."
+fi
+echo "	Type ${red}commands${normal} for a list of available commands."
+# Still the build's default password? (pam_motd runs this as root)
+PW=$(getent shadow restartos | cut -d: -f2)
+if [ "${PW:0:3}" == '$6$' ] && [ "$(openssl passwd -6 -salt "$(echo "$PW" | cut -d'$' -f3)" restartos)" == "$PW" ]; then
+	echo "	${bold}${red}The restartos password is still the default.${normal} Change it with"
+	echo "	${green}passwd${normal} then ${green}sudo make-persistent add /etc/shadow${normal}"
+fi
+echo

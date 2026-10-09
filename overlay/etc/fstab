@@ -1,0 +1,2 @@
+# restartOS: / is an overlay assembled by the initrd; nothing to mount here.
+tmpfs /tmp tmpfs defaults,nosuid 0 0

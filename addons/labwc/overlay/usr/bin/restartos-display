@@ -1,0 +1,35 @@
+#!/bin/sh
+# Screen power + waybar refit for labwc, called by swayidle and kanshi.
+#   lock     swayidle timeout/before-sleep: swaylock, refit windows after unlock
+#   idle     swayidle timeout: outputs off, stop kanshi
+#   resume   swayidle resume:  restart kanshi (it re-enables outputs), outputs on
+#   changed  kanshi exec, after any output (re)appeared: refit windows
+#
+# Some monitors drop HDMI hotplug every ~12s while they have no signal. labwc
+# re-adds each one as a new output; rc.xml has autoEnableOutputs=no so labwc
+# leaves it off, and kanshi (the only thing that enables outputs) is stopped
+# while idle, so the monitor gets no signal and stays asleep.
+# labwc 0.8.3 also leaves windows sized over waybar after a reconnect; a waybar
+# reload (SIGUSR2) makes it re-fit them (waybar launchers use setsid -f, so
+# reloading doesn't kill apps). A refit while swaylock is up doesn't stick, so
+# 'lock' also refits once swaylock exits.
+F=${XDG_RUNTIME_DIR:-/tmp}/restartos-screen-off
+refit() { sleep "${1:-1}"; pkill -USR2 -x waybar; }
+case $1 in
+lock)
+	pgrep -x swaylock > /dev/null || swaylock -f -c 000000
+	setsid -f sh -c 'while pgrep -x swaylock > /dev/null; do sleep 0.2; done; sleep 0.3; pkill -USR2 -x waybar' > /dev/null 2>&1 ;;
+idle)
+	touch "$F"
+	pkill -x kanshi
+	wlopm --off '*' ;;
+resume)
+	rm -f "$F"
+	pgrep -x kanshi > /dev/null || setsid -f kanshi > /dev/null 2>&1
+	wlopm --on '*'
+	refit 1 ;;
+changed)
+	if [ -e "$F" ]; then wlopm --off '*'; else refit 2; fi ;;
+*)
+	echo "usage: $0 lock|idle|resume|changed" >&2; exit 1 ;;
+esac

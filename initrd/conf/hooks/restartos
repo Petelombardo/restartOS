@@ -1,0 +1,25 @@
+#!/bin/sh
+# Adds the restartOS boot logic to the initrd; see initrd/README.md.
+# Runs inside the build root, where the recipe is bind-mounted at /recipe.
+PREREQ="busybox"
+prereqs() { echo "$PREREQ"; }
+case $1 in prereqs) prereqs; exit 0 ;; esac
+
+. /usr/share/initramfs-tools/hook-functions
+F=/recipe/files
+
+for s in usb loadsystem common cdrom sort-packages; do
+	cp -p "$F/scripts/$s" "$DESTDIR/scripts/$s"
+done
+for b in find-linux find-cdrom get-memory-default totalmem; do
+	cp -p "$F/bin/$b" "$DESTDIR/bin/$b"
+done
+
+# loadsystem copies the images with pv; find-linux needs util-linux blkid
+# (busybox's has no -U/-L)
+copy_exec /usr/bin/pv /bin/pv
+rm -f "$DESTDIR/bin/blkid" "$DESTDIR/sbin/blkid" "$DESTDIR/usr/bin/blkid" "$DESTDIR/usr/sbin/blkid"
+copy_exec /usr/sbin/blkid /sbin/blkid
+copy_exec /usr/sbin/zramctl /sbin/zramctl
+
+sh "$F/patch-init" "$DESTDIR/init" || exit 1

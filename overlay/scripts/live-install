@@ -1,0 +1,10 @@
+FOLDER="$1"
+cd ${FOLDER}
+for i in $(find ./ -type d | sort | uniq); do FILE=$(echo $i | sed -e 's/^\.//'); if [ ! -d $FILE ]; then ln -s ${PWD}${FILE} ${FILE}; fi; done
+for i in $(find ./ \( -type f -or -type l \) | sort | uniq); do FILE=$(echo $i | sed -e 's/^\.//'); if [ ! -e ${FILE} ]; then ln -s ${PWD}${FILE} ${FILE}; fi; done
+ldconfig
+for SCRIPT in $(find ${FOLDER}/scripts/startup -type f)
+do
+	bash $SCRIPT
+done
+systemctl daemon-reload

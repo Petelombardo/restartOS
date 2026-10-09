@@ -1,0 +1,19 @@
+#!/bin/bash
+for argument in $(cat /proc/cmdline)
+do
+        KEY=$(echo $argument | cut -d'=' -f1)
+        if [ "$KEY" == "gui" ]; then
+                VALUE=$(echo $argument | cut -d'=' -f2)
+                if [ "$VALUE" == "0" ]; then
+                        echo 0;
+                        exit 1;
+                else
+                        echo 1;
+                        exit 0;
+                fi
+        fi
+done
+
+# If we get this far, then no objections were made.  Let's start the gui.
+echo 1
+exit 0

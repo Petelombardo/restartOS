@@ -1,0 +1,53 @@
+#!/bin/bash
+# Test restartOS images under QEMU/KVM without running make: builds a throwaway
+# 'restartos'-labelled disk from the given .img files and boots it with a board's
+# kernel + initrd via /builds/restartOS/qemu. Runs as a normal user.
+#
+# usage: ./test-qemu [options] [addon.img ...] [-- qemu-options]
+#   -b DIR    board dir with boot.tar.gz + initrd.img + config (default restartOS/opi5/6.18.54-ophub)
+#   -s IMG    system image to test       (default /builds/packages/system.img)
+#   -M IMG    system-modules image       (default system-modules-$MODULES.img from the board config)
+#   -i FILE   initrd                     (default the board's initrd.img)
+# Everything after -- goes to /builds/restartOS/qemu: -g, -x cmds, -S shot.png, -l log, -t secs, -m MB ...
+set -e
+
+BOARD=/builds/restartOS/opi5/6.18.54-ophub
+SYSTEM=/builds/packages/system.img
+MODIMG=""
+INITRD=""
+while getopts "b:s:M:i:" o; do
+	case $o in
+		b) BOARD=$OPTARG ;; s) SYSTEM=$OPTARG ;; M) MODIMG=$OPTARG ;; i) INITRD=$OPTARG ;;
+		*) sed -n '2,12p' "$0"; exit 1 ;;
+	esac
+done
+PREV=$((OPTIND-1))
+NOADDONS=0
+[ $PREV -gt 0 ] && [ "${!PREV}" = "--" ] && NOADDONS=1   # getopts ate a leading --
+shift $((OPTIND-1))
+ADDONS=()
+while [ $NOADDONS -eq 0 ] && [ $# -gt 0 ] && [ "$1" != "--" ]; do ADDONS+=("$1"); shift; done
+[ $NOADDONS -eq 0 ] && [ "$1" = "--" ] && shift
+
+source "$BOARD/config"
+INITRD=${INITRD:-$BOARD/initrd.img}
+if [ -z "$MODIMG" ]; then
+	MODIMG=/builds/packages/system-modules-$MODULES.img
+	[ -f "$BOARD/system-modules-$MODULES.img" ] && MODIMG=$BOARD/system-modules-$MODULES.img
+fi
+
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/disk/boot"
+
+KERNEL=$(tar -tzf "$BOARD/boot.tar.gz" | grep -m1 "boot/vmlinuz-")
+tar -xzOf "$BOARD/boot.tar.gz" "$KERNEL" > "$T/Image"
+cp "$SYSTEM" "$T/disk/system.img"
+cp "$MODIMG" "${ADDONS[@]}" "$T/disk/"
+cp /builds/restartOS/version /builds/restartOS/changelog "$T/disk/"
+echo "== Test disk: $(cd "$T/disk" && ls *.img | tr '\n' ' ')"
+SIZE=$(( $(du -sm "$T/disk" | cut -f1) * 110 / 100 + 64 ))
+/usr/sbin/mkfs.ext4 -q -F -m 0 -L restartos -d "$T/disk" "$T/disk.img" ${SIZE}M
+rm -rf "$T/disk"
+
+/builds/restartOS/qemu -k "$T/Image" -i "$INITRD" "$@" "$T/disk.img"

@@ -1,0 +1,201 @@
+#MODULESFOLDER=$(find /usr/lib/modules/* -type d -maxdepth 0)
+
+# xhci_hcd xhci_pci usb_storage uas usbcore mmc_core mmc_block sdhci sdhci_pltfm sdhci_brcmstb bcm2835_dma dw_axi_dmac_platform rp1 rp1_pcie
+for MODULE in squashfs overlay loop ext4 isofs intel-lpss-pci spi-pxa2xx-pci spi-pxa2xx-platform apple-bce applespi xen-blkfront overlayfs
+do
+	echo "Loading ${MODULE}"
+	modprobe $MODULE
+done
+#modprobe xen-blkfront
+#modprobe squashfs
+#modprobe overlay
+#modprobe loop
+#modprobe ext4
+#modprobe isofs
+#modprobe intel-lpss-pci
+#modprobe spi-pxa2xx-pci
+#modprobe spi-pxa2xx-platform
+#modprobe apple-bce
+#modprobe applespi
+
+#DEBUG=0
+DEBUG=0
+
+#SIZE=`/bin/get-memory-default`
+
+#TOTALMEM=`/bin/totalmem`
+TOTALMEM=$(free | grep -i "^Mem" | cut -d':' -f2 | sed -e 's/^ *//g' | cut -d' ' -f1)
+SIZE=$((TOTALMEM*110*8/1000))
+
+echo 3 > /proc/sys/vm/drop_caches
+
+TOTALFREE=$(free | grep "^Mem" | sed -e 's/^[a-zA-Z:]* *[0-9]* *[0-9]* *\([0-9]*\) *.*$/\1/' | grep -v "^$")
+
+
+
+echo "Totalfree: $TOTALFREE"
+echo "Totalmem: $TOTALMEM"
+echo "System Mem: $SIZE"
+
+# Extract the MEMDISK parameter from the kernel command line
+MEMDISK=$(grep -io 'MEMDISK=[0-9]*' /proc/cmdline | cut -d '=' -f 2)
+
+# Check if MEMDISK is empty
+if [ -z "$MEMDISK" ]; then
+    echo "MEMDISK parameter not found in kernel command line"
+else
+	echo "MEMDISK: $MEMDISK"
+fi
+
+
+if [ "$TOTALMEM" == "" ]; then
+        TOTALMEM=0
+fi
+
+PACKAGESIZE=`du -s /drive | sed -e 's/^\([0-9][0-9]*\).*$/\1/'`
+echo "Packagesize: $PACKAGESIZE"
+
+# Make the ramdisk big enough to fit all of the .img files + 10% of whatever memory remains
+REQUESTEDSIZE=$(($PACKAGESIZE+(TOTALFREE-PACKAGESIZE)/20))
+
+if [ $((TOTALFREE-REQUESTEDSIZE)) -gt 0 ]; then
+	RAMDISKSIZE=$REQUESTEDSIZE; # Use package + 80% of memory if that amount is available
+elif [ $SIZE -gt $TOTALFREE ]; then
+	RAMDISKSIZE=$SIZE; # Use 80% of the total memory if that number is > what's free
+else
+	RAMDISKSIZE=$(($TOTALFREE*100*9/1000)); # If all else fails, use 90% of free memory for packages (some won't copy)
+fi
+
+if [ ! "$MEMDISK" == "" ]; then
+	RAMDISKSIZE=$((MEMDISK*1024))
+fi
+echo "Limiting tmpfs to $RAMDISKSIZE KB"
+
+if [ $DEBUG -eq 1 ]; then
+	read
+fi
+
+# THIS WAS INTENDED TO MAKE EVERYTHING RUN IN ZRAM TO MAKE IT MORE EFFICIENT..  BUT IT WAS NOT WORKING
+#modprobe zram num_devices=1
+#echo lz4 > /sys/block/zram0/comp_algorithm
+#echo $(($RAMDISKSIZE*1024)) > /sys/block/zram0/disksize
+#zramctl -s ${RAMDISKSIZE}KiB /dev/zram0
+#RAMDISKDEV="/dev/zram0"
+#ZRAMDISK="zram0"
+#modprobe ext4
+#mkfs.ext4 -O ^has_journal -m 0 ${RAMDISKDEV}
+
+mount tmpfs ${rootmnt} -t tmpfs -o noatime,size=${RAMDISKSIZE}K || echo "Could not mount tmpfs"
+#mount ${RAMDISKDEV} ${rootmnt} -o noatime
+
+mkdir -p ${rootmnt}/restartos
+mkdir -p ${rootmnt}/restartos/images
+mkdir -p ${rootmnt}/restartos/rw
+mkdir -p ${rootmnt}/restartos/system
+mkdir -p ${rootmnt}/restartos/overlays
+#mount ${RAMDISKDEV} ${rootmnt}/restartos/overlays
+if [ $DEBUG -eq 1 ]; then
+	echo "ext4 formatted zfs ramdisk"
+	df -h ${rootmnt}/restartos/overlays/
+	read quit
+	if [ "$quit" == "exit" ]; then
+		exit
+	fi
+fi
+
+mkdir -p ${rootmnt}/restartos/system-overlay;
+
+mkdir -p ${rootmnt}/restartos/overlays/work
+mkdir -p ${rootmnt}/restartos/overlays/upper
+mkdir -p ${rootmnt}/restartos/lowerdirs
+
+zramctl
+if [ $DEBUG -eq 1 ]; then
+	df -h
+	read
+fi
+
+echo "-- Copying files into RAM --"
+for i in `find /drive/system.img /drive/system-modules-$(uname -r).$(uname -m).img /drive/system-modules-$(uname -r).img /drive/static*.img -maxdepth 1 \( -type f -o -type l \) -name "*.img" 2>/dev/null`
+do
+	FREEMEM=`df ${rootmnt} | sed -e 's/^[a-zA-Z]* *[0-9]* *[0-9]* *\([0-9]*\) *.*$/\1/' | grep -v "^$"`
+	PACKAGESIZE=`du $i | sed -e 's/^\([0-9][0-9]*\).*$/\1/'`
+	if [ $FREEMEM -gt $((PACKAGESIZE + 10240)) ]; then
+		echo "`basename $i`"
+		pv < $i > ${rootmnt}/restartos/images/`basename $i`
+	fi
+done
+cp -v /drive/boot.tar.gz /drive/efi.tar.gz /drive/isolinux/vmlinuz64 /drive/isolinux/initrd64.xz /drive/version ${rootmnt}/restartos/images/
+
+echo ""
+
+if [ $DEBUG -eq 1 ]; then
+	df -h ${rootmnt}
+	read
+fi
+
+
+echo "Loading System..."
+mount -o loop ${rootmnt}/restartos/images/system.img ${rootmnt}/restartos/system
+ls ${rootmnt}/restartos/system/
+
+echo "Loading System Addons..."
+	SUFFIX="`uname -r`.`uname -m`"
+	SUFFIX2="`uname -r`"
+	for i in `ls ${rootmnt}/restartos/images/system-modules-$SUFFIX.img ${rootmnt}/restartos/images/system-modules-$SUFFIX2.img`
+	do
+		echo "     Mounting $i"
+		mkdir -p ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'`
+		mount -o loop "$i" ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'`
+		ls ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'`/
+	done
+
+echo "Loading Static Addons..."
+	for i in `ls ${rootmnt}/restartos/images/static-addons*.img | sort`
+	do
+		mkdir -p ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'`
+		echo Mounting $i on ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'`
+		mount -o loop "$i" ${rootmnt}/restartos/lowerdirs/`basename $i | sed -e 's/\.[^\.]*$//'` 
+	done
+
+if [ $DEBUG -eq 1 ]; then
+	read
+fi
+
+echo "Creating overlays.."
+#        if [ -d "${rootmnt}/restartos/lowerdirs/static-addons-persistent" ]; then
+#                LOWERDIRS="${rootmnt}/restartos/lowerdirs/static-addons-persistent/"
+#        fi
+	echo "Running sort-packages"
+	for i in `/scripts/sort-packages | sed -e 's/\n//' | grep -v "^$"`
+	do
+		echo "Processing $i"
+		if [ ! "$i" == "${rootmnt}/restartos/lowerdirs/static-addons-persistent/" ]; then
+			if [ ! "$LOWERDIRS" == "" ]; then
+				LOWERDIRS=$LOWERDIRS":$i"
+			elif [ ! "$i" == "" ]; then
+				LOWERDIRS=$i
+			fi
+		fi
+	done
+	LOWERDIRS=$LOWERDIRS":${rootmnt}/restartos/system/"
+	echo $LOWERDIRS
+	modprobe overlay
+	mount -t overlay none -o lowerdir=$LOWERDIRS,upperdir=${rootmnt}/restartos/overlays/upper,workdir=${rootmnt}/restartos/overlays/work ${rootmnt}/restartos/system-overlay || echo "Error mounting the overlay! LOWERDIRS=$LOWERDIRS ROOTMNT:$rootmnt $(ls ${rootmnt}/restartos/overlays/)"
+#echo	mount -t overlay none -o lowerdir=$LOWERDIRS,upperdir=${rootmnt}/restartos/overlays/upper,workdir=${rootmnt}/restartos/overlays/work ${rootmnt}/restartos/system-overlay || echo "Error mounting the overlay! LOWERDIRS=$LOWERDIRS ROOTMNT:$rootmnt $(ls ${rootmnt}/restartos/overlays/)"
+# DEBUG
+#sh
+#######
+	if [ $? -eq 0 ]; then
+		echo "Successfully mounted overlays"
+		ls ${rootmnt}/restartos/overlays/system-overlay/
+	fi
+
+mkdir -p ${rootmnt}/restartos/system-overlay/mnt/boot
+mkdir -p ${rootmnt}/restartos/system-overlay/mnt/overlays
+mount --bind -o ro ${rootmnt}/restartos/images ${rootmnt}/restartos/system-overlay/mnt/boot
+mount --rbind ${rootmnt}/restartos/overlays ${rootmnt}/restartos/system-overlay/mnt/overlays
+mount --rbind ${rootmnt}/restartos/system-overlay ${rootmnt}
+
+#echo "Updating mtab entries"; # Not needed in Buster since mtab is populated from /proc
+#cp /etc/mtab ${rootmnt}/etc/

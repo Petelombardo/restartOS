@@ -1,0 +1,2 @@
+%sudo ALL=(ALL)NOPASSWD:/usr/bin/clone-source
+%sudo ALL=(ALL)NOPASSWD:/usr/bin/clone-target

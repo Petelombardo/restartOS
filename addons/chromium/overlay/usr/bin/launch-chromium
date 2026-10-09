@@ -1,0 +1,4 @@
+#!/bin/sh
+exec chromium --ozone-platform=wayland \
+  --disable-accelerated-video-decode \
+  --disk-cache-dir=/dev/null --disk-cache-size=1 --media-cache-size=1 "$@"

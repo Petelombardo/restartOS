@@ -1,0 +1,39 @@
+#!/bin/bash
+# Runs podman-compose for every compose file one folder below this script's
+# folder (FOLDER/podman/<service>/*.yml|*.yaml). pihole starts last and stops last,
+# so DNS is there while the others pull and shut down.
+
+CPATH=${COMPOSE_DIR:-$(dirname "$(realpath -s "$0")")}
+
+function files() {
+	find "$CPATH" -mindepth 2 -maxdepth 2 \( -name '*.yml' -o -name '*.yaml' \) | sort | grep $1 pihole
+}
+
+function compose() {
+	for file in $(files -v) $(files ""); do
+		echo "== $file: $*"
+		(cd "$(dirname "$file")" && podman-compose -f "$(basename "$file")" "$@")
+	done
+}
+
+function cleanup(){
+	rm -f /run/containers/networks/aardvark-dns/* "$XDG_RUNTIME_DIR"/containers/networks/aardvark-dns/* 2>/dev/null
+}
+
+case $1 in
+stop)
+	compose down
+	cleanup
+	;;
+start)
+	compose up -d
+	;;
+restart)
+	compose down
+	cleanup
+	sleep 2
+	compose up -d
+	;;
+*)
+	echo "Usage: control-everything [start|stop|restart]"
+esac

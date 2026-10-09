@@ -1,0 +1,12 @@
+[terminal]
+vt = 7
+
+# Boot straight into labwc as restartos (restartOS autologin)
+[initial_session]
+command = "labwc"
+user = "restartos"
+
+# Shown after logging out of labwc
+[default_session]
+command = "tuigreet --time --remember --cmd labwc"
+user = "_greetd"

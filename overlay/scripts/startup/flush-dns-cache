@@ -1,0 +1,4 @@
+#!/bin/bash
+resolvectl flush-caches
+
+exit 0

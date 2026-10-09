@@ -1,0 +1,258 @@
+#!/bin/bash
+
+bold=$(tput bold)
+normal=$(tput sgr0)
+
+if [ ! `whoami` == "root" ]; then
+	echo "You must run this program as root or via sudo."
+	exit
+fi
+
+ARGS="$@"
+ACTION="$1"
+UNMOUNT=1
+
+finish() {
+	cd /
+	rm -rf /tmp/squashtmp
+	if [ $UNMOUNT -eq 1 ]; then
+		umount /mnt/system
+	else
+		echo "Leaving /mnt/system mounted (the way we found it)."
+	fi
+}
+
+case $ACTION in
+remove)
+	;;
+add)
+	;;
+update)
+	;;
+list)
+	;;
+restore)
+	;;
+*)
+        echo "Usage: sudo make-persistent [action] [file1] [file2] [folder1] ..."
+        echo "This application will take a snapshot of the current state of the file/folder and make it persist across reboots."
+        echo
+        echo "Actions"
+	echo
+        echo "${bold}help${normal}      - This page; ex: make-persistent help"
+        echo "${bold}add${normal}       - Add files/folders to persistent storage; ex: make-persistent add /etc /home/restartos/test.txt"
+        echo "${bold}update${normal}    - Update an existing persistent storage archive; ex: make-persistent update"
+        echo "${bold}list${normal}      - List the files/folders in the current persistent storage archive; ex: make-persistent list"
+        echo "${bold}remove${normal}    - Remove persistence; ex: make-persistent remove /tmp/test.txt; ex: make-persistent remove"
+        echo "${bold}restore${normal}   - Go back to the previous persistent archive (swaps it with the current one); ex: make-persistent restore"
+        echo
+        echo "Every save keeps the previous archive as static-addons-persistent.img.bak on the boot media,"
+        echo "and the current archive is only replaced once the new one is written and verified."
+        echo
+        exit
+	;;
+esac
+
+
+OLDPATH=`pwd`
+FILENAME="static-addons-persistent.img"
+mkdir -p /tmp/squashtmp
+if [ ! -d /mnt/system ]; then
+	mkdir /mnt/system
+fi
+
+TYPE=`cat /proc/cmdline | egrep -o " root=[A-Z]* " | cut -d'=' -f2 | cut -d' ' -f1`
+if [ "$TYPE" == "CDROM" ]; then
+        echo "Sorry, you cannot store persistent data if you booted from a CDROM."
+        exit
+else
+        if mountpoint -q /mnt/system; then
+		# Already mounted (by the user, or left over): use it and leave it mounted
+		echo "Using the existing mount on /mnt/system."
+		mounted=1
+		UNMOUNT=0
+	else
+		echo "Please insert the boot media if you have not yet done so."
+		count=0
+		mounted=0
+		while [ $count -lt 10 ] && [ $mounted -eq 0 ]
+		do
+			mounted=1
+			mount -t auto UUID=2FA0-F622 /mnt/system 2> /dev/null || mount -t auto LABEL=RestartOS /mnt/system 2> /dev/null || mount -t auto LABEL=restartos /mnt/system 2> /dev/null || mounted=0
+			if [ $mounted -eq 0 ]; then
+				count=$((count+1))
+				sleep 2
+				echo -n "."
+			fi
+		done
+		echo
+	fi
+        if [ $mounted -eq 0 ]; then
+                echo "No persistent media found. Exiting."
+                exit
+        fi
+fi
+
+IMG=/mnt/system/$FILENAME
+
+if [ "$ACTION" == "restore" ]; then
+	if [ ! -f $IMG.bak ]; then
+		echo "There is no previous archive ($IMG.bak) to restore."
+		finish
+		exit 1
+	fi
+	if ! unsquashfs -l $IMG.bak > /dev/null 2>&1; then
+		echo "The previous archive $IMG.bak is unreadable too; leaving everything as it is."
+		finish
+		exit 1
+	fi
+	# Swap, so a restore can itself be undone by running restore again
+	[ -f $IMG ] && mv $IMG $IMG.swap
+	mv $IMG.bak $IMG
+	[ -f $IMG.swap ] && mv $IMG.swap $IMG.bak
+	sync
+	echo "Restored the previous persistent archive ($(date -r $IMG '+%Y-%m-%d %H:%M')). Reboot to use it."
+	[ -f $IMG.bak ] && echo "The archive it replaced is now $FILENAME.bak (run restore again to undo)."
+	finish
+	exit
+fi
+
+echo
+echo "Extracting persistent read-only archive."
+if [ -f $IMG ]; then
+	if ! unsquashfs -i -f -d /tmp/squashtmp $IMG > /dev/null 2>&1; then
+		echo "${bold}$IMG is unreadable (damaged).${normal}"
+		if [ "$ACTION" == "list" ] || { [ "$ACTION" == "remove" ] && [ $# -le 1 ]; }; then
+			:   # listing what's left, or removing it all, still works
+		else
+			echo "Not saving over it, since that would drop whatever it still held."
+			[ -f $IMG.bak ] && echo "Run ${bold}sudo make-persistent restore${normal} to go back to the previous archive,"
+			echo "or ${bold}sudo make-persistent remove${normal} to start over."
+			finish
+			exit 1
+		fi
+	fi
+fi
+
+case $ACTION in
+remove)
+        COUNT=0
+        for i in `echo "$@"`
+        do
+                if [ ! "$i" == "remove" ] && [ ! "$i" == "" ]; then
+                        if [ -f /tmp/squashtmp/$i ] || [ -d /tmp/squashtmp/$i ] || [ -L /tmp/squashtmp/$i ]; then
+                                echo "Removing persistent data file $i"
+				rm -rf /tmp/squashtmp/$i
+                                COUNT=$((COUNT+1))
+				FILETOREMOVE="$i"
+				if [ -f /tmp/squashtmp/scripts/persistent-dirs.txt ]; then
+					echo "Removing $FILETOREMOVE from persistent-dirs"
+					sed '\%^'$FILETOREMOVE'[/]*$%d' -i /tmp/squashtmp/scripts/persistent-dirs.txt
+					cp -a /tmp/squashtmp/scripts/persistent-dirs.txt /scripts/
+				fi
+                        else
+                                echo "Skipping $i as it is already not persistent."
+                        fi
+                fi
+        done
+        if [ $COUNT -eq 0 ]; then
+                echo "Removing all persistent data."
+		if [ -f $IMG ]; then
+			mv -f $IMG $IMG.bak
+			sync
+			echo "(Kept as $FILENAME.bak: ${bold}sudo make-persistent restore${normal} brings it back.)"
+		fi
+		finish
+		exit
+        fi
+	;;
+list)
+	echo
+	echo "${bold}Persistent Files${normal}"
+	find /tmp/squashtmp | sed -e 's/^\/tmp\/squashtmp\///'
+	if [ -f /scripts/persistent-dirs.txt ]; then
+		echo
+		echo "${bold}Persistent Folders${normal}"
+		cat /scripts/persistent-dirs.txt
+	fi
+	finish
+	exit
+	;;
+add)
+	if [ !  "$ARGS" == "" ]; then
+		for i in "$@"
+		do
+			if [ ! "$i" == "add" ]; then
+				echo "$i"
+				if [ -f "$i" ] || [ -d "$i" ]; then
+					if [ -d "$i" ]; then
+						mkdir -p /tmp/squashtmp/scripts
+						if [ -f /scripts/persistent-dirs.txt ]; then
+							cp -a /scripts/persistent-dirs.txt /tmp/squashtmp/scripts/
+						fi
+						echo "$i" >> /tmp/squashtmp/scripts/persistent-dirs.txt
+						cp -a /tmp/squashtmp/scripts/persistent-dirs.txt /scripts/
+					fi
+					cp -aRv --parents "$i" /tmp/squashtmp/
+				fi
+			fi
+		done
+	fi
+	;;
+update)
+	rsync -l --existing --delete -avx / /tmp/squashtmp/
+	if [ -f /scripts/persistent-dirs.txt ]; then
+		rsync -l -avx --delete --recursive --files-from=/scripts/persistent-dirs.txt / /tmp/squashtmp/
+	fi
+	;;
+esac
+
+cd /tmp/squashtmp/
+
+fail() {
+	echo "${bold}$1${normal}"
+	rm -f /tmp/$FILENAME $IMG.new
+	if [ -f $IMG ]; then
+		echo "Nothing was changed: the existing persistent archive is untouched."
+	fi
+	finish
+	exit 1
+}
+
+echo "Creating persistent data store"
+rm -f /tmp/$FILENAME
+mksquashfs ./ /tmp/$FILENAME -noappend > /tmp/make-persistent.log 2>&1 ||
+	fail "mksquashfs failed (out of memory in /tmp?), see /tmp/make-persistent.log"
+unsquashfs -l /tmp/$FILENAME > /dev/null 2>&1 || fail "The new archive doesn't read back correctly."
+
+# The new archive is written next to the current one as .new, so the boot
+# media needs room for it while both the current archive and its .bak exist.
+# If there isn't, and dropping the old .bak would make enough, drop it (the current
+# archive stays the fallback); otherwise leave everything alone.
+NEED=$(( $(stat -c %s /tmp/$FILENAME) / 1024 + 1024 ))
+FREE=$(df -Pk /mnt/system | awk 'NR==2 {print $4}')
+if [ $FREE -lt $NEED ] && [ -f $IMG.bak ] && [ $(( FREE + $(du -k $IMG.bak | cut -f1) )) -ge $NEED ]; then
+	echo "Not enough room on the boot media; deleting the older backup $FILENAME.bak."
+	rm -f $IMG.bak
+	sync
+	FREE=$(df -Pk /mnt/system | awk 'NR==2 {print $4}')
+fi
+[ $FREE -lt $NEED ] && fail "Not enough room on the boot media: need $((NEED / 1024)) MB, $((FREE / 1024)) MB free."
+
+echo "Copying persistent data to boot device."
+cp /tmp/$FILENAME $IMG.new && sync || fail "Writing $IMG.new failed."
+# Compare what's actually on the media, not the page cache
+echo 3 > /proc/sys/vm/drop_caches
+cmp -s /tmp/$FILENAME $IMG.new || fail "$IMG.new doesn't match what was written (bad media?)."
+
+# Only now replace the current archive; the old one becomes .bak
+[ -f $IMG ] && mv -f $IMG $IMG.bak
+mv -f $IMG.new $IMG
+sync
+echo "Cleaning up temporary files."
+rm -f /tmp/$FILENAME
+finish
+echo "Update complete"
+[ -f $IMG.bak ] && echo "The previous archive is kept as $FILENAME.bak (${bold}sudo make-persistent restore${normal} to go back)."
+
+cd $OLDPATH

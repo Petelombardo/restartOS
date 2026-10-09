@@ -1,0 +1,5 @@
+# restartOS 15 awscli addon: AWS CLI v2 (Debian's awscli, with its own botocore).
+# Pulls in python3 + its libraries; deps already in system.img are skipped.
+awscli
+# `aws help` / `aws <cmd> help` render their pages through groff (a Depends, listed for clarity)
+groff-base

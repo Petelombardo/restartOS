@@ -1,0 +1,24 @@
+#mako >/dev/null 2>&1 &
+swaync > /dev/null 2>&1 &
+
+swaybg -c 333333 -m fill -i /home/restartos/Downloads/background.jpg > /dev/null 2>&1 &
+
+swayidle -w \
+	timeout 300 'restartos-display lock' \
+	timeout 600 'restartos-display idle' \
+	resume 'restartos-display resume' \
+	before-sleep 'restartos-display lock' >/dev/null 2>&1 &
+
+dbus-update-activation-environment --systemd --all
+# backgrounded: this can take ~25s and would otherwise hold up waybar
+systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk &
+/usr/libexec/xdg-desktop-portal -r &
+
+waybar 2>&1 > /dev/null &
+
+# output scaling: ~/.config/kanshi/config (reapplied on hotplug/monitor wake)
+kanshi > /dev/null 2>&1 &
+#SCALE=2.5; SCALEFACTOR=$(echo $SCALE | sed -e 's/\.//'); wlr-randr --output DP-1 --scale $SCALE --pos 0,0 --output HDMI-A-1 --scale 2.0 --pos $((2560*10/$SCALEFACTOR)),0 &
+
+# polkit agent for GUI privilege prompts
+lxpolkit > /dev/null 2>&1 &

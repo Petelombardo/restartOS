@@ -1,0 +1,199 @@
+#!/bin/bash
+# Build a minimal restartOS system tree from THIS host's installed Debian packages.
+# The result is a normal package folder: point /builds/system at it and run
+# ./compress "comment" from /builds/system as usual to produce system.img.
+#
+# usage: sudo ./build [target-dir]     (default /builds/static-addons-system-trixie)
+set -e
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+R=${1:-/builds/static-addons-system-trixie}
+WORK=$HERE/work
+NEWUSER=restartos
+NEWUID=1000
+ARCH=$(dpkg --print-architecture)     # packages-$ARCH.txt and overlay-$ARCH/ add per-arch bits
+case $ARCH in
+	arm64) LDSO=/lib/ld-linux-aarch64.so.1 ;;
+	amd64) LDSO=/lib64/ld-linux-x86-64.so.2 ;;
+	*) echo "Unsupported architecture '$ARCH' (add its dynamic loader here)"; exit 1 ;;
+esac
+
+if [ "$(id -u)" -ne 0 ]; then
+	echo "Run as root (sudo $0) so file ownership and setuid bits are copied exactly."
+	exit 1
+fi
+case "$R" in
+	/builds/static-addons-*) ;;
+	*) echo "Refusing to build into '$R' (must be /builds/static-addons-*)"; exit 1 ;;
+esac
+
+# Build into $R.building and swap it in at the end: an interrupted build leaves
+# the previous one intact. Step out first, in case we were started from inside it.
+cd /
+FINAL=$R
+R=$FINAL.building
+rm -rf "$R" "$WORK"
+mkdir -p "$R" "$WORK"
+
+echo "== Resolving package closure"
+python3 "$HERE/resolve.py" $(cat "$HERE/packages.txt" $(ls "$HERE/packages-$ARCH.txt" 2>/dev/null) | grep -v '^#') > "$WORK/closure.txt"
+echo "   $(wc -l < "$WORK/closure.txt") packages"
+
+echo "== Collecting files"
+python3 "$HERE/collect.py" "$WORK/closure.txt" "$WORK/files.txt"
+
+echo "== Copying files into $R"
+ln -s usr/bin "$R/bin"
+ln -s usr/sbin "$R/sbin"
+ln -s usr/lib "$R/lib"
+[ -L /lib64 ] && ln -s "$(readlink /lib64)" "$R/lib64"   # amd64: the ELF interpreter path
+tar -C / --no-recursion --verbatim-files-from --xattrs --xattrs-include=security.capability -T "$WORK/files.txt" -cf - |
+	tar -C "$R" -xpf - --same-owner --xattrs --xattrs-include=security.capability   # keeps setcap bits (ping, mtr-packet)
+
+echo "== Applying overlay"
+cp -r --preserve=mode,timestamps "$HERE/overlay/." "$R/"
+(cd "$HERE/overlay" && find . -mindepth 1) | while read -r p; do chown -h root:root "$R/$p"; done
+if [ -d "$HERE/overlay-$ARCH" ]; then
+	echo "== Applying overlay-$ARCH"
+	cp -r --preserve=mode,timestamps "$HERE/overlay-$ARCH/." "$R/"
+	(cd "$HERE/overlay-$ARCH" && find . -mindepth 1) | while read -r p; do chown -h root:root "$R/$p"; done
+fi
+chmod 0440 "$R/etc/sudoers" "$R/etc/sudoers.d/"*
+for s in changeuser make-persistent package upgrade; do
+	ln -sfn "/scripts/$s" "$R/usr/bin/$s"
+done
+
+echo "== Creating base directories"
+# mnt/system: where upgrade, package, changeuser and make-persistent mount the boot media
+for d in dev proc sys run mnt mnt/system media srv opt home var/log etc/systemd/system; do
+	mkdir -p "$R/$d"
+done
+install -d -m 0700 "$R/root"
+install -d -m 1777 "$R/tmp" "$R/var/tmp"
+ln -sfn ../proc/self/mounts "$R/etc/mtab"
+mknod -m 666 "$R/dev/null" c 1 3      # for chroot steps; removed at the end
+
+echo "== Generating users and groups"
+# uid/gid < 100 are static base-passwd allocations (identical on every Debian).
+# Every other system account is copied from the host so the numeric owners tar
+# preserved on the copied files keep meaning the same account in the image.
+DAYS=$(( $(date +%s) / 86400 ))
+cp "$R/usr/share/base-passwd/passwd.master" "$R/etc/passwd"
+cp "$R/usr/share/base-passwd/group.master" "$R/etc/group"
+sed -i -e 's#^root:\(.*\):/bin/sh$#root:\1:/bin/bash#' "$R/etc/passwd"
+POSTINST_USERS="_chrony avahi tcpdump"                 # created by maintainer scripts, not sysusers.d
+POSTINST_GROUPS="_chrony netdev _ssh avahi tcpdump"
+SYSUSERS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1=="u" || $1=="u!" {print $2}')
+SYSGROUPS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1 ~ /^(u|u!|g)$/ {print $2}')
+FILEUSERS=$(find "$R" -xdev -printf '%U\n' | sort -un | while read -r u; do getent passwd "$u" | cut -d: -f1; done)
+FILEGROUPS=$(find "$R" -xdev -printf '%G\n' | sort -un | while read -r g; do getent group "$g" | cut -d: -f1; done)
+for u in $(echo $POSTINST_USERS $SYSUSERS $FILEUSERS | tr ' ' '\n' | sort -u); do
+	grep -q "^$u:" "$R/etc/passwd" && continue
+	e=$(getent passwd "$u") || continue
+	[ "$(echo "$e" | cut -d: -f3)" -lt 1000 ] && echo "$e" >> "$R/etc/passwd"
+done
+PRIMARY=$(cut -d: -f4 "$R/etc/passwd" | while read -r g; do getent group "$g" | cut -d: -f1; done)
+for g in $(echo $POSTINST_GROUPS $SYSGROUPS $FILEGROUPS $PRIMARY | tr ' ' '\n' | sort -u); do
+	grep -q "^$g:" "$R/etc/group" && continue
+	e=$(getent group "$g") || continue
+	[ "$(echo "$e" | cut -d: -f3)" -lt 1000 ] && echo "$(echo "$e" | cut -d: -f1-3):" >> "$R/etc/group"
+done
+systemd-sysusers --root="$R"           # anything the host didn't have
+
+echo "$NEWUSER:x:$NEWUID:$NEWUID:RestartOS,,,:/home/$NEWUSER:/bin/bash" >> "$R/etc/passwd"
+echo "$NEWUSER:x:$NEWUID:" >> "$R/etc/group"
+for g in tty disk dialout sudo audio video plugdev users systemd-journal input render netdev; do
+	grep -q "^$g:" "$R/etc/group" && sed -i -e "/^$g:/ { s/:\$/:$NEWUSER/; t; s/\$/,$NEWUSER/ }" "$R/etc/group"
+done
+cut -d: -f1 "$R/etc/passwd" | sed -e "s/\$/:*:$DAYS:0:99999:7:::/" -e "s/^$NEWUSER:\*:/$NEWUSER:!:/" > "$R/etc/shadow"
+awk -F: '{print $1":*::"$4}' "$R/etc/group" > "$R/etc/gshadow"
+# Default password restartos/restartos so a headless box can be found (avahi) and
+# ssh'd into; root stays locked (sudo). The MOTD nags while it's still the default.
+HASH=$(openssl passwd -6 "${PASSWORD:-$NEWUSER}")   # sudo PASSWORD=... ./build bakes in another one
+awk -F: -v OFS=: -v u="$NEWUSER" -v h="$HASH" '$1 == u {$2 = h} 1' "$R/etc/shadow" > "$R/etc/shadow.new"
+mv "$R/etc/shadow.new" "$R/etc/shadow"
+chown root:root "$R/etc/passwd" "$R/etc/group"
+chown root:shadow "$R/etc/shadow" "$R/etc/gshadow"
+chmod 0644 "$R/etc/passwd" "$R/etc/group"
+chmod 0640 "$R/etc/shadow" "$R/etc/gshadow"
+mkdir -p "$R/home/$NEWUSER"
+cp -a "$R/etc/skel/." "$R/home/$NEWUSER/"
+cat >> "$R/home/$NEWUSER/.bashrc" <<'BASHRC'
+export LC_ALL=en_US.UTF-8
+export LANG=en_US.UTF-8
+export LANGUAGE=en_US.UTF-8
+BASHRC
+chown -R $NEWUID:$NEWUID "$R/home/$NEWUSER"
+
+echo "== Config files normally generated by maintainer scripts"
+cp "$R/usr/share/openssh/sshd_config" "$R/etc/ssh/sshd_config"
+cp "$R/usr/share/chrony/chrony.conf" "$R/etc/chrony/chrony.conf"
+install -m 0640 -o root -g _chrony /dev/null "$R/etc/chrony/chrony.keys"
+ln -sfn ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"
+ln -sfn "$(readlink /etc/localtime)" "$R/etc/localtime"
+[ -f /etc/timezone ] && cp /etc/timezone "$R/etc/timezone"
+ln -sfn /usr/bin/nc.traditional "$R/etc/alternatives/nc"   # clone-source/target need -l -p / -q
+ln -sfn /etc/alternatives/nc "$R/usr/bin/nc"
+
+echo "== Empty dpkg database (for addon maintainer scripts)"
+mkdir -p "$R/var/lib/dpkg/info" "$R/var/lib/dpkg/updates" "$R/var/lib/dpkg/alternatives" "$R/var/lib/dpkg/triggers"
+touch "$R/var/lib/dpkg/status" "$R/var/lib/dpkg/available"
+
+echo "== Trigger handlers (addons activate these at boot via /scripts/startup/01-postinst-triggers)"
+for P in $(cat "$WORK/closure.txt"); do
+	I=/var/lib/dpkg/info/$P
+	[ -f $I.triggers ] || I=/var/lib/dpkg/info/$P:$(dpkg --print-architecture)
+	if [ -f $I.triggers ] && [ -f $I.postinst ] && grep -qE "^interest[a-z-]* +/" $I.triggers; then
+		cp -p $I.postinst "$R/scripts/postinst.d/$P.postinst"
+		echo "   $P"
+	fi
+done
+
+echo "== CA certificates"
+(cd "$R/usr/share/ca-certificates" && find . -name '*.crt' | sed -e 's#^\./##' | sort) > "$R/etc/ca-certificates.conf"
+chroot "$R" /usr/sbin/update-ca-certificates --fresh > /dev/null
+
+echo "== Locale"
+echo "en_US.UTF-8 UTF-8" > "$R/etc/locale.gen"
+chroot "$R" /usr/bin/localedef -i en_US -c -f UTF-8 en_US.UTF-8
+
+echo "== Machine identity"
+od -An -N16 -tx1 /dev/urandom | tr -d ' \n' > "$R/etc/machine-id"
+echo >> "$R/etc/machine-id"
+chmod 0444 "$R/etc/machine-id"
+
+echo "== Enabling units"
+systemctl --root="$R" set-default multi-user.target
+systemctl --root="$R" enable getty@tty1.service restartos.service restartos-shutdown.service \
+	NetworkManager.service systemd-resolved.service chrony.service haveged.service \
+	avahi-daemon.service
+
+echo "== Building ld.so.cache"
+chroot "$R" /sbin/ldconfig
+
+echo "== Checking shared library dependencies"
+MISSING=$(chroot "$R" /bin/sh -c '
+	for f in $(find /usr/bin /usr/sbin /usr/lib -type f \( -perm -u+x -o -name "*.so*" \)); do
+		head -c4 "$f" | grep -q ELF || continue
+		'"$LDSO"' --list "$f" 2>/dev/null | grep "not found" | sed -e "s#^#$f: #"
+	done' | sort -u)
+if [ -n "$MISSING" ]; then
+	echo "$MISSING"
+	echo "!! Unresolved libraries above (dlopen-only modules may be fine)"
+fi
+
+echo "== Package manifest"
+mkdir -p "$R/scripts/packages"
+dpkg-query -W -f='${Package} ${Version}\n' $(cat "$WORK/closure.txt") | sort > "$R/scripts/packages/system"
+echo "   $(wc -l < "$R/scripts/packages/system") packages -> /scripts/packages/system"
+
+rm -f "$R/dev/null"
+ln -s /builds/scripts/compress "$R/compress"
+
+rm -rf "$FINAL"
+mv "$R" "$FINAL"
+R=$FINAL
+
+echo
+echo "Done: $R ($(du -sh "$R" | cut -f1))"
+echo "To package it:  ln -sfn $(basename "$R") /builds/system && cd /builds/system && ./compress \"comment\""

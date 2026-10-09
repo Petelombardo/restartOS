@@ -1,0 +1,12 @@
+/etc/netplan/
+/home/restartos/.local/share
+/home/restartos/.local/state
+/home/restartos/.local/lib/
+/home/restartos/.cache/vivaldi/Default/Storage/
+/home/restartos/.ssh/
+/home/restartos/.config/chromium/
+/home/restartos/.local/share/applications/
+/home/restartos/.local/share/icons/
+/home/restartos/.local/share/mime/
+/home/restartos/.claude/
+/home/restartos/.claude.json

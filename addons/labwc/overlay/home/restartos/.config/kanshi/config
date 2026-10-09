@@ -1,0 +1,9 @@
+# Applied by kanshi whenever outputs change (boot, monitor wake, hotplug),
+# unlike a one-shot wlr-randr in autostart. Per-monitor profiles go above
+# this catch-all, e.g.:  profile desk { output HDMI-A-1 enable scale 2 }
+# "enable" is required: rc.xml sets autoEnableOutputs=no, so kanshi is what
+# turns outputs on. The exec handles idle/waybar refit (see restartos-display).
+profile {
+	output * enable scale 2
+	exec restartos-display changed
+}

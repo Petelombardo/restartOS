@@ -1,0 +1,37 @@
+#!/bin/bash
+# Podman's storage must live on a physical disk (images are too big for the RAM
+# overlay). Binds the storage folders from a mounted disk over their system paths.
+# Runtime state (/run/containers, /run/user/<uid>/...) stays on tmpfs.
+
+if [ "$1" == "" ]; then
+	echo "Podman must be installed somewhere on a physical disk in order to run.  All you have to do is mount the disk and then run this script."
+	echo "Usage: install-podman /my/mounted/disk/path/"
+	exit 1
+fi
+
+FOLDER=${1%/}
+
+function prep_folder () {
+	if [ ! -d "$1" ]; then
+		mkdir -p "$1"
+		chown "$3" "$1"
+	fi
+	if mountpoint -q "$2"; then
+		echo "$1 already mounted to $2"
+		return
+	fi
+	runuser restartos -s /bin/bash -c "mkdir -p '$2'" 2>/dev/null || true
+	mkdir -p "$2"
+	echo "Mounting: Binding $1 on $2"
+	mount -o bind "$1" "$2"
+}
+
+prep_folder "$FOLDER/var/lib/containers" /var/lib/containers root:root
+prep_folder "$FOLDER/var/tmp" /var/tmp root:root
+chmod 1777 "$FOLDER/var/tmp"
+prep_folder "$FOLDER/containers" /home/restartos/.local/share/containers restartos:restartos
+
+mkdir -p "$FOLDER/podman"
+if [ ! -L "$FOLDER/podman/control-everything" ] && [ ! -f "$FOLDER/podman/control-everything" ]; then
+	ln -s /scripts/control-everything "$FOLDER/podman/control-everything"
+fi

@@ -1,0 +1,203 @@
+#!/bin/bash
+. "$(dirname "$(readlink -f "$0")")/../scripts/restartos-env"
+EXTRACMDS=""
+
+source ./config
+
+VERSION=$(cat /builds/restartOS/version | cut -d'.' -f1)
+DISKSIZE=$((SIZE*1024*1024/512))
+#sed -i disk.sfdisk -e "s/\(size= *\)[0-9]*,/\1"$DISKSIZE",/"
+
+if [ $TESTBUILD -eq 1 ]; then
+	CUSTOMNAME="${CUSTOMNAME}-test"
+fi
+
+if [ "$FILESYSTEM" == "fat" ]; then
+	TYPE="0b"
+else
+	TYPE="83"
+fi
+
+rm -v /builds/restartOS-$CUSTOMNAME.img.gz /builds/restartOS-$CUSTOMNAME.img 2> /dev/null
+pv < mbr.img > /builds/restartOS-$CUSTOMNAME.img
+
+# Partition size in KB: everything that gets copied onto it, plus headroom for
+# ext4 metadata/journal. The modules image is decided here (not later) so it is
+# counted too.
+if [ -f ./system-modules-$MODULES.img ]; then
+	MODULESIMG=./system-modules-$MODULES.img
+else
+	MODULESIMG=/builds/packages/system-modules-$MODULES.img
+fi
+
+INITSIZE=$(( $(stat -c %s initrd.img) / 1024 ))
+BOOTSIZE=$(( $(gzip -l boot.tar.gz | awk 'NR==2 {print $2}') / 1024 ))
+
+SIZE=$(( BOOTSIZE + INITSIZE + $(du -k $MODULESIMG | cut -f1) ))
+for PACKAGE in $PACKAGES
+do
+	SIZE=$(( SIZE + $(du -k /builds/packages/$PACKAGE | cut -f1) ))
+done
+echo "Content: ${SIZE}K"
+
+SIZE=$(( SIZE * 110 / 100 + 65536 ))	# +10% and 64MB for filesystem overhead
+
+# mbr.img may be shorter than the partition offset; that gap comes out of the disk too
+MBRSIZE=$(( $(stat -c %s mbr.img) / 1024 ))
+GAP=$(( OFFSET / 2 - MBRSIZE ))
+[ $GAP -gt 0 ] && SIZE=$(( SIZE + GAP ))
+echo $SIZE
+dd if=/dev/zero bs=1K count=$SIZE | pv >> /builds/restartOS-$CUSTOMNAME.img
+
+#echo wipefs -af /builds/restartOS-$CUSTOMNAME.img
+#echo sfdisk --delete ../restartOS-$CUSTOMNAME.img 1
+#echo "$OFFSET,,$TYPE," | sfdisk -X dos /builds/restartOS-$CUSTOMNAME.img
+
+DISKSECTORS=$(ls -l /builds/restartOS-$CUSTOMNAME.img | cut -d' ' -f5)
+DISKSECTORS=$(((DISKSECTORS/512)-1))
+#PARTSTART=$(cat disk.sfdisk | grep "start" | sed -e 's/^.*start= *\([0-9]*\),.*/\1/')
+PARTEND=$((DISKSECTORS-PARTSTART-1))
+
+
+
+disk_device="/builds/restartOS-$CUSTOMNAME.img"
+start_sector=$OFFSET
+partition_size=$((PARTEND-SECTOR_START))
+## Check if disk device exists and is a block device
+#if ! [[ -b "$disk_device" ]] && ! [[ -f "$disk_device" ]]; then
+#    echo "Error: Disk device $disk_device does not exist or is not a block device."
+#    exit 1
+#fi
+## Check if the disk already has a GPT label
+#if parted -m -s "$disk_device" print | grep -q "GPT table"; then
+#    # Erase the existing GPT label
+#    parted -m -s "$disk_device" unit s rm part 1
+#fi
+## Create a new GPT label
+#parted -m -s "$disk_device" unit s mklabel gpt
+## Create the partition
+#parted -m -s "$disk_device" unit s mkpart primary ${OFFSET}s 100%
+
+if [ "$MBTYPE" == "" ]; then
+	MBTYPE="GPT"
+fi
+
+# Check if disk device exists and is a block device
+if ! [[ -b "$disk_device" ]] && ! [[ -f "$disk_device" ]]; then
+    echo "Error: Disk device $disk_device does not exist or is not a block device."
+    exit 1
+fi
+
+# Normalize MBTYPE to lowercase
+
+MBTYPE_LOWER=$(echo "${MBTYPE}" | tr '[:upper:]' '[:lower:]')
+FILESYSTEM_LOWER=$(echo "${FILESYSTEM}" | tr '[:upper:]' '[:lower:]')
+
+# Check if the disk already has a partition table
+if parted -m -s "$disk_device" print 2>/dev/null | grep -q "^/"; then
+    parted -m -s "$disk_device" mklabel msdos
+fi
+
+# Create the specified partition table type
+parted -m -s "$disk_device" mklabel "${MBTYPE_LOWER}"
+
+# Create the partition with appropriate type
+if [[ "${MBTYPE_LOWER}" == "msdos" ]]; then
+    # For MBR/MSDOS
+    case "${FILESYSTEM_LOWER}" in
+        fat)
+            # Create FAT32 partition (type 0x0C - FAT32 LBA)
+            parted -m -s "$disk_device" unit s mkpart primary fat32 ${OFFSET}s 100%
+            parted -m -s "$disk_device" set 1 lba on
+            ;;
+        ext2)
+            # Create ext2 partition (type 0x83 - Linux)
+            parted -m -s "$disk_device" unit s mkpart primary ext2 ${OFFSET}s 100%
+            ;;
+        ext4)
+            # Create ext4 partition (type 0x83 - Linux)
+            parted -m -s "$disk_device" unit s mkpart primary ext4 ${OFFSET}s 100%
+            ;;
+    esac
+else
+    # For GPT
+    case "${FILESYSTEM_LOWER}" in
+        fat)
+            # Create EFI System Partition
+            parted -m -s "$disk_device" unit s mkpart primary ${OFFSET}s 100%
+            parted -m -s "$disk_device" set 1 esp on
+            ;;
+        ext2|ext4)
+            # Create Linux filesystem partition
+            parted -m -s "$disk_device" unit s mkpart primary ${FILESYSTEM_LOWER} ${OFFSET}s 100%
+            ;;
+    esac
+fi
+
+#sfdisk -w always -f /builds/restartOS-$CUSTOMNAME.img < disk.sfdisk
+#fdisk -l /builds/restartOS-$CUSTOMNAME
+
+# Attempt to read the partition table to figure out if the partition is ext4 or fat
+#TYPE=$(fdisk -l /builds/restartOS-$CUSTOMNAME -o device,type | grep "^/" | cut -d' ' -f2)
+#if [ "$FILESYSTEM" == "" ] && [ "$TYPE" == "Linux" ]; then
+#	FILESYSTEM="ext4"
+#elif [ "$FILESYSTEM" == "" ]; then
+#	FILESYSTEM="fat"
+#fi
+
+kpartx -a /builds/restartOS-$CUSTOMNAME.img
+DEVICE=$(kpartx -l /builds/restartOS-$CUSTOMNAME.img | cut -d' ' -f1 | tail -n 1)
+BLOCKDEV=$(lsblk -l | sed -e 's/  */ /g' | grep $DEVICE | cut -d' ' -f2)
+
+MAJOR=$(echo $BLOCKDEV | cut -d':' -f1)
+MINOR=$(echo $BLOCKDEV | cut -d':' -f2)
+echo mknod /dev/$DEVICE b $MAJOR $MINOR
+mknod /dev/$DEVICE b $MAJOR $MINOR
+if [ "$FILESYSTEM" == "fat" ]; then
+	mkdosfs -F 32 -n restartos /dev/$DEVICE
+elif [ "$FILESYSTEM" == "ext2" ]; then
+	mkfs.ext2 -m 0 -i 16384 /dev/$DEVICE -L restartos
+else
+	mkfs.ext4 -m 0 -i 16384 /dev/$DEVICE -L restartos
+fi
+mkdir -p /mnt/restartos
+mount /dev/$DEVICE /mnt/restartos || exit
+tar -zxvf boot.tar.gz -C /mnt/restartos/
+
+if [ ! -f ./system-modules-$MODULES.img ]; then
+        echo "Using shared system modules"
+        PACKAGES="$PACKAGES system-modules-$MODULES.img"
+else
+        echo "Using local system modules"
+        cp -v ./system-modules-$MODULES.img /mnt/restartos/
+fi
+
+for PACKAGE in $PACKAGES
+do
+	cp -v /builds/packages/$PACKAGE /mnt/restartos/
+done
+
+echo $VERSION > /mnt/restartos/version
+if [ $USEUINITRD -eq 1 ]; then
+	mkimage -A arm -T ramdisk -C none -n uInitrd -d initrd.img /mnt/restartos/$INITRDNAME || {
+		echo "ERROR: mkimage failed writing $INITRDNAME (partition full?)"; df -h /mnt/restartos
+		umount /mnt/restartos; kpartx -d /builds/restartOS-$CUSTOMNAME.img; exit 1; }
+	cp /mnt/restartos/$INITRDNAME ./
+else
+	cp initrd.img /mnt/restartos/$INITRDNAME
+fi
+
+$EXTRACMDS
+
+df -h /mnt/restartos
+
+umount /mnt/restartos
+kpartx -d /builds/restartOS-$CUSTOMNAME.img
+#echo "Flashing the MBR"
+#dd if=mbr.img of=/builds/restartOS-$CUSTOMNAME.img bs=512 conv=notrunc
+
+upload /builds/restartOS-$CUSTOMNAME.img
+
+echo "Done building image"
+exit
+

@@ -1,0 +1,8 @@
+[Desktop Entry]
+# Hidden entry so waybar's taskbar and labwc find an icon for the running window:
+# GTK sets its app_id from the binary name, gpartedbin, not gparted.
+Type=Application
+Name=GParted
+Icon=gparted
+Exec=/usr/local/bin/gparted
+NoDisplay=true

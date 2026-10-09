@@ -1,0 +1,11 @@
+# Extra modules for the restartOS initrd (on top of MODULES=most).
+# The images are squashfs files, loop-mounted from a tmpfs and stacked with overlayfs.
+squashfs
+overlay
+loop
+ext4
+vfat
+isofs
+usb-storage
+uas
+usb-conn-gpio

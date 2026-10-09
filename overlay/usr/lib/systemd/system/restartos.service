@@ -1,0 +1,15 @@
+[Unit]
+Description=restartOS Startup Scripts
+Before=network-online.target
+
+[Service]
+Type=forking
+ExecStart=/scripts/restartos-start
+ExecStop=/scripts/restartos-stop
+KillMode=process
+TimeoutStartSec=120
+TimeoutStopSec=60
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

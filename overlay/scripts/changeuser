@@ -1,0 +1,48 @@
+#!/bin/bash
+
+if [ ! "$(whoami)" == "root" ]; then
+	echo "You must run with sudo"
+	exit
+fi
+
+function get_users() {
+	for FOLDER in $(find /mnt/system/users/* -maxdepth 0 -type d)
+	do
+		echo $(basename $FOLDER)
+	done
+}
+
+function get_current_user() {
+	echo $(basename $(realpath /mnt/system/static-addons-persistent.img | sed -e 's/static-addons-persistent.img//'))
+}
+
+if [ ! $(grep "/mnt/system" /etc/mtab | wc -l) -gt 0 ]; then
+	mount LABEL=restartos /mnt/system || exit 1
+fi
+
+if [ "$1" == "" ]; then
+	echo -n "Current user: "
+	get_current_user
+	echo
+	echo "Available Users:"
+	get_users
+	echo
+	echo "Usage: changeuser [user]"
+	exit
+else
+	CURRENTUSER=$(get_current_user)
+	if [ -d /mnt/system/users/$1 ] && [ ! "$1" == "$CURRENTUSER" ]; then
+		rm /mnt/system/static-addons-persistent.img
+		cd /mnt/system
+		ln -s users/$1/static-addons-persistent.img ./
+		echo "Changed user from $CURRENTUSER to $1"
+	elif [ "$1" == "$CURRENTUSER" ]; then
+		echo "You are already $CURRENTUSER"
+		exit
+	else
+		echo "User $1 does not exist"
+	fi
+fi
+
+umount /mnt/system > /dev/null 2>&1
+

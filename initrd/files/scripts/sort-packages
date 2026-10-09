@@ -1,0 +1,25 @@
+LIST=""
+
+for i in `find ${rootmnt}/restartos/lowerdirs/static-addons* ${rootmnt}/restartos/lowerdirs/system-modules* -maxdepth 0 2> /dev/null`;
+do
+	if [ -d $i ] && [ ! "$i" == "${rootmnt}/restartos/lowerdirs/static-addons-persistent" ]; then
+	        FOLDER=$i
+	        if [ -f $i/scripts/order ] && [ ! "`cat $i/scripts/order`" == "" ]; then
+	                LIST=$LIST"`cat $i/scripts/order`:$FOLDER "
+	        else
+	                LIST=$LIST"99:$FOLDER "
+	        fi
+	fi
+done;
+
+if [ -d ${rootmnt}/restartos/lowerdirs/static-addons-persistent ]; then
+	echo ${rootmnt}/restartos/lowerdirs/static-addons-persistent
+fi
+
+for i in `echo $LIST | sort | grep -v "^$"`
+do
+	FOLDER=`echo $i | cut -d':' -f2`
+	if [ -d $FOLDER ]; then
+		echo $FOLDER
+	fi
+done

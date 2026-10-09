@@ -1,0 +1,17 @@
+#!/bin/sh
+# Patch initramfs-tools' /init for restartOS (run by hooks/restartos):
+#  - root=USB / root=CDROM name the boot media by search instead of by device
+#  - /scripts/usb is sourced after the boot script, so its mountroot() (find the
+#    restartOS media, load the images into RAM, mount the overlay root) always wins
+set -e
+INIT=$1
+sed -i '/ROOT=\${x#root=}/,/;;/{
+/^[[:space:]]*fi$/a\
+		case "$ROOT" in\
+		CDROM) ROOT=$(/bin/find-cdrom); BOOT=cdrom ;;\
+		USB) ROOT=$(/bin/find-linux); BOOT=usb ;;\
+		esac
+}' "$INIT"
+sed -i 's|^\. "/scripts/${BOOT}"$|&\n. /scripts/usb|' "$INIT"
+grep -q 'BOOT=usb ;;' "$INIT" || { echo "patch-init: root=USB/CDROM patch did not apply" >&2; exit 1; }
+grep -qx '\. /scripts/usb' "$INIT" || { echo "patch-init: /scripts/usb patch did not apply" >&2; exit 1; }

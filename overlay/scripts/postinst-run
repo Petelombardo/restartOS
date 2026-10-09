@@ -1,0 +1,53 @@
+#!/bin/bash
+# Replay a Debian package's install-time maintainer scripts at boot.
+# Addons built by /builds/scripts/create-package ship, per package:
+#   /scripts/postinst.d/<pkg>.accounts   system users/groups, with the build host's ids
+#   /scripts/postinst.d/<pkg>.preinst    run as "preinst install"
+#   /scripts/postinst.d/<pkg>.postinst   run as "postinst configure"
+# and a /scripts/startup/00-postinst-<pkg> that calls this script.
+# /scripts/startup/01-postinst-triggers then calls it in trigger mode for the
+# dpkg file triggers the layers' files activate (schemas, caches, ...).
+#
+# usage: postinst-run <package>
+#        postinst-run <package> triggered <trigger> [...]
+PKG=$1
+D=/scripts/postinst.d
+[ -n "$PKG" ] || { echo "usage: $0 <package>"; exit 1; }
+
+export PATH=/scripts/postinst-shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export DEBIAN_FRONTEND=noninteractive
+export DPKG_MAINTSCRIPT_PACKAGE=$PKG
+export DPKG_MAINTSCRIPT_ARCH=$(dpkg --print-architecture)
+export DPKG_ROOT=""
+
+if [ "$2" = "triggered" ]; then
+	shift 2
+	if [ -x "$D/$PKG.postinst" ]; then
+		echo "$PKG: postinst triggered $*"
+		DPKG_MAINTSCRIPT_NAME=postinst "$D/$PKG.postinst" triggered "$*" || echo "$PKG: trigger failed ($?)"
+	else
+		echo "$PKG: no postinst to handle triggers $*"
+	fi
+	exit 0
+fi
+
+# Accounts first (groups, then users) so maintainer scripts find them already
+# present and files copied from the build host keep their owners.
+if [ -f "$D/$PKG.accounts" ]; then
+	grep "^group " "$D/$PKG.accounts" | cut -d' ' -f2- | while IFS=: read -r name pw gid members; do
+		getent group "$name" > /dev/null || groupadd -r -g "$gid" "$name"
+	done
+	grep "^user " "$D/$PKG.accounts" | cut -d' ' -f2- | while IFS=: read -r name pw uid gid gecos home shell; do
+		getent passwd "$name" > /dev/null || useradd -r -M -u "$uid" -g "$gid" -c "$gecos" -d "$home" -s "$shell" "$name"
+	done
+fi
+
+if [ -x "$D/$PKG.preinst" ]; then
+	echo "$PKG: preinst install"
+	DPKG_MAINTSCRIPT_NAME=preinst "$D/$PKG.preinst" install || echo "$PKG: preinst failed ($?)"
+fi
+if [ -x "$D/$PKG.postinst" ]; then
+	echo "$PKG: postinst configure"
+	DPKG_MAINTSCRIPT_NAME=postinst "$D/$PKG.postinst" configure || echo "$PKG: postinst failed ($?)"
+fi
+exit 0

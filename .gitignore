@@ -1,0 +1,11 @@
+# per-host settings
+local.conf
+# build scratch
+work/
+__pycache__/
+*.pyc
+*.building/
+# build outputs and downloads never belong in the repo
+*.img
+*.img.old
+*.deb

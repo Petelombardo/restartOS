@@ -1,0 +1,14 @@
+# Sourced by the build scripts: finds the repo and loads the untracked local.conf
+# (environment-specific settings such as where finished images are uploaded).
+# See local.conf.example.
+RESTARTOS_REPO=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
+[ -f "$RESTARTOS_REPO/local.conf" ] && . "$RESTARTOS_REPO/local.conf"
+
+# upload <file>   copy a finished image to $UPLOAD_HOST:$UPLOAD_DIR/<major version>/
+#                 (no-op unless local.conf sets UPLOAD_HOST)
+upload() {
+	[ -n "$UPLOAD_HOST" ] || return 0
+	local major
+	major=$(cut -d'.' -f1 /builds/restartOS/version)
+	scp $UPLOAD_SCP_OPTS "$1" "$UPLOAD_HOST:$UPLOAD_DIR/$major/"
+}

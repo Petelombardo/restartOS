@@ -1,0 +1,7 @@
+#!/bin/bash
+if [ "$1" == "" ]; then
+	echo "Usage: get-missing-files [folder]"
+	exit
+fi
+
+find "$1" -type f -exec ldd {} \; 2>/dev/null | grep "not found" | sort | uniq

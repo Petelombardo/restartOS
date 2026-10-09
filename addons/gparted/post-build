@@ -1,0 +1,4 @@
+# Menu entry uses the Wayland-friendly launcher (overlay/usr/local/bin/gparted)
+# instead of Debian's pkexec one, which can't reach the display.
+sed -i 's|^Exec=/usr/sbin/gparted|Exec=/usr/local/bin/gparted|' "$DEST/usr/share/applications/gparted.desktop"
+grep -q '^Exec=/usr/local/bin/gparted' "$DEST/usr/share/applications/gparted.desktop"

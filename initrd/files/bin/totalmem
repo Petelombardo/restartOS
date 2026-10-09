@@ -1,0 +1,2 @@
+#/bin/sh
+/bin/cat /proc/meminfo | /bin/grep MemTotal | /bin/sed -e 's/^MemTotal: *\([0-9]*\).*$/\1/'

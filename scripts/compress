@@ -1,0 +1,46 @@
+#!/bin/bash
+. "$(dirname "$(readlink -f "$0")")/restartos-env"
+VERSION=$(cat /builds/restartOS/version | cut -d'.' -f1)
+POINT=$(cat /builds/restartOS/version | cut -d'.' -f2)
+POINT=$((POINT+1))
+
+echo "${VERSION}.${POINT}" > /builds/restartOS/version
+
+DIR=`pwd | sed -e 's/^.*\///'`
+# Whatever folder /builds/system points to is system.img, even when sudo has
+# dropped the /builds/system path and pwd shows the real folder name
+if [ "$(pwd -P)" = "$(readlink -f /builds/system)" ]; then
+	DIR="system"
+fi
+
+if [ "$1" == "" ]; then
+	echo "Comment required"
+	echo "Usage: ./compress \"Comment Here\""
+	exit
+fi
+
+if [ -f /builds/packages/$DIR.img ]; then
+	if [ -f /builds/packages/$DIR.img.old ]; then
+		rm -f /builds/packages/$DIR.img.old
+	fi
+	mv /builds/packages/$DIR.img /builds/packages/$DIR.img.old
+fi
+
+#time mksquashfs . /builds/packages/$DIR.img -b $((1024*256)) -one-file-system-x -comp xz -Xdict-size 512K -b 1M -noappend -regex -e 'compress$' -processors 4
+time mksquashfs . /builds/packages/$DIR.img -b $((1024*256)) -comp zstd -noappend -regex -e 'compress$'
+if [ "$DIR" == "static-addons-system" ]; then
+#	pv < /builds/packages/system.img > /builds/restartOS/system.img
+	DIR="system"
+fi
+if [ -f /builds/restartOS/$DIR.img ]; then
+	pv < /builds/packages/$DIR.img > /builds/restartOS/$DIR.img
+fi
+
+if [ ! $(echo $DIR | grep '^system-modules' | wc -l) -gt 0 ]; then
+	upload /builds/packages/$DIR.img
+	if [ -n "$UPLOAD_HOST" ] && [ "${UPLOAD_MD5:-1}" = 1 ]; then
+		ssh "$UPLOAD_HOST" "cd $UPLOAD_DIR/$VERSION/; md5sum static*.img system.img > file-list.md5"
+	fi
+fi
+
+echo $1 >> /builds/restartOS/changelog

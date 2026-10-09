@@ -1,0 +1,15 @@
+# Ship the host's compiled bytecode with the addon's python files. dpkg doesn't list
+# __pycache__, so without this every boot's replayed py3compile postinsts (python3,
+# awscli, python3-*) would byte-compile the whole set again into the tmpfs overlay.
+# Runs as root from build-addon with $DEST set.
+n=0
+while read -r d; do
+	src=${d#"$DEST"}/__pycache__
+	[ -d "$src" ] || continue
+	cp -a "$src" "$d/"
+	n=$((n + 1))
+done < <(find "$DEST/usr/lib" -name '*.py' -printf '%h\n' | sort -u)
+echo "   __pycache__ copied for $n dirs"
+
+# No AWS config or credentials: run `aws configure` (or `aws sso login`) on the
+# device and `sudo make-persistent add /home/restartos/.aws`.

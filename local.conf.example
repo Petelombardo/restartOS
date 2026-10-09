@@ -1,0 +1,14 @@
+# Copy to local.conf (not tracked by git) and adjust for this build host.
+
+# Upload finished images (compress: system/addon images, make: board images) to
+# $UPLOAD_HOST:$UPLOAD_DIR/<major version>/ over scp. Leave UPLOAD_HOST empty to
+# keep everything local.
+UPLOAD_HOST=
+UPLOAD_DIR=/srv/restartos
+UPLOAD_SCP_OPTS="-c aes128-ctr"
+# After an upload, compress refreshes file-list.md5 there (ssh + md5sum).
+UPLOAD_MD5=1
+
+# Home of the user whose Claude Code / pi installs the ai addon copies
+# (default: the user who ran sudo).
+#AI_SRC_HOME=/home/you

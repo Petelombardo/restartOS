@@ -1,0 +1,6 @@
+// restartos already has NOPASSWD sudo; don't ask for a password to start GParted.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.gnome.gparted" && subject.user == "restartos") {
+        return polkit.Result.YES;
+    }
+});

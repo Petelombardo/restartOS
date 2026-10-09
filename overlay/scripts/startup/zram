@@ -1,0 +1,13 @@
+#!/bin/bash
+PATH=$PATH:/bin:/sbin
+echo "Starting ZRAM Swap"
+echo " - Clearing caches"
+echo 1 > /proc/sys/vm/drop_caches
+FREEMEM=$(free --mega | grep "Mem" | sed -e 's/  */,/g' | cut -d',' -f4)
+ZRAMSIZE=$((FREEMEM*2)); # Since zram compresses with average 2:1, we will set it to 2:1
+echo " - Creating ZRAM disk"
+ZRAMDEVICE=`zramctl -f -s ${ZRAMSIZE}M`
+echo " - Initializing Swap"
+mkswap $ZRAMDEVICE
+echo " - Enabling Swap"
+swapon $ZRAMDEVICE

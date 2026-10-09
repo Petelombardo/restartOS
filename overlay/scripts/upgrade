@@ -1,0 +1,96 @@
+#!/bin/bash
+
+PATH=$PATH:/usr/bin:/usr/sbin:/sbin:/bin
+#VERSION=11
+VERSION=$(cat /mnt/boot/version | cut -d'.' -f1)
+
+if [ ! "`whoami`" == "root" ]; then
+	echo "You must run this command as root."
+	exit
+fi
+
+UNMOUNT=1
+
+TYPE=`cat /proc/cmdline | egrep -o " root=[A-Z]* " | cut -d'=' -f2 | cut -d' ' -f1`
+if [ "$TYPE" == "CDROM" ]; then
+	echo "Sorry, you cannot update if you booted from a CDROM."
+	exit
+else
+	echo "Please insert boot media if you have not yet done so."
+	count=0
+	mounted=0
+	mkdir -p /mnt/system
+	if mountpoint -q /mnt/system; then
+		mounted=1
+		UNMOUNT=0
+	fi
+	while [ $count -lt 10 ] && [ $mounted -eq 0 ]
+	do
+		mounted=1
+		mount -t auto UUID=2FA0-F622 /mnt/system 2> /dev/null || mount -t auto LABEL=RestartOS /mnt/system 2> /dev/null || mount -t auto LABEL=restartos /mnt/system 2> /dev/null || mounted=0
+		count=$((count+1))
+		sleep 2
+		echo -n "."
+	done
+	if [ $mounted -eq 0 ]; then
+		echo "No media found. Exiting upgrade."
+		exit
+	fi
+	echo "Media found. Checking for updates."
+	cd /mnt/system
+
+	echo "Downloading the most recent list of files."
+	FILES=`wget -q --show-progress http://www.restartos.com/$VERSION/file-list.md5 -O - 2> /dev/null`
+	if [ "$FILES" == "" ]; then
+		echo "Sorry, there was a problem downloading the files.  You might not have Internet access.   Aborting upgrade."
+		cd /tmp
+		[ $UNMOUNT -eq 1 ] && umount /mnt/system
+		exit
+	fi
+	MODULES=`echo "$FILES" | grep "system-modules" | sed -e 's/^.* //' | sort -nr | grep -m1 "" | cut -d' ' -f3`
+	for i in $MODULES
+	do
+		if [ -f $i ]; then
+			MODULES=`echo $MODULES | sed -e "s/"$i"//"`
+		fi
+	done
+
+	for i in `ls *.img | grep -vE "^kernel|vmlinuz|initrd"` $MODULES version changelog
+	do
+		if [ -f $i ]; then
+			echo "Checking for an updated $i"
+			OLDMD5=`md5sum $i | cut -d' ' -f1`
+			NEWMD5=`echo "$FILES" | grep $i | cut -d' ' -f1`
+			if [ ! "$OLDMD5" == "$NEWMD5" ] && [ ! "$NEWMD5" == "" ]; then
+				echo "Update for $i scheduled for download."
+				# Download next to the current file and only replace it once the
+				# download is complete and matches the published md5; a failed or
+				# interrupted download never touches the working file.
+				if wget -q --show-progress http://www.restartos.com/$VERSION/$i -O $i.new &&
+				   [ "$(md5sum < $i.new | cut -d' ' -f1)" == "$NEWMD5" ]; then
+					sync
+					mv -f $i.new $i
+					echo $NEWMD5 > $i.md5
+				else
+					echo "Download of $i failed or didn't match its md5 (out of space?); keeping the current $i."
+					rm -f $i.new
+					FAILED=1
+				fi
+			fi
+		fi
+	done
+
+	echo "Download complete.  Please wait while the changes are committed to disk."
+	sync
+	cd /tmp
+	if [ $UNMOUNT -eq 1 ]; then
+	        umount /mnt/system
+	else
+	        echo "Leaving /mnt/system mounted (the way we found it)."
+	fi
+	if [ "$FAILED" == "1" ]; then
+		echo "Update finished with errors (see above); the files that failed were left as they were."
+	else
+		echo "Update Finished! - You may now safely remove your USB drive."
+	fi
+fi

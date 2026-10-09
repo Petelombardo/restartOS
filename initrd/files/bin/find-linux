@@ -1,0 +1,2 @@
+PATH=$PATH:/bin
+blkid -U 2FA0-F622 || blkid -L restartos

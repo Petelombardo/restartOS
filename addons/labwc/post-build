@@ -1,0 +1,28 @@
+# Emoji in colour: DejaVu Sans (the default UI font, in system.img) has its own
+# black-and-white copies of the classic smileys (U+1F600...), and apps use them
+# directly because they're in the primary font, so only newer emoji reached Noto
+# Color Emoji. Ship copies with the emoji blocks unmapped; this layer sits above
+# system.img, so they replace the originals. etc/fonts/conf.d/05-restartos-color-emoji.conf
+# does the same for fontconfig fallback (Symbola, Noto Sans Symbols 2).
+# Needs python3-fonttools on the build host.
+if ! python3 -c 'import fontTools' 2>/dev/null; then
+	echo "   python3-fonttools is needed to build this addon:  sudo apt install python3-fonttools"
+	exit 1
+fi
+python3 - "$DEST" <<'PY'
+import os, sys
+from fontTools.ttLib import TTFont
+dest = sys.argv[1]
+for name in ('DejaVuSans.ttf', 'DejaVuSans-Bold.ttf'):
+    path = '/usr/share/fonts/truetype/dejavu/' + name
+    font = TTFont(path)
+    dropped = 0
+    for table in font['cmap'].tables:
+        for cp in [c for c in table.cmap if 0x1F000 <= c <= 0x1FAFF]:
+            del table.cmap[cp]
+            dropped += 1
+    os.makedirs(os.path.dirname(dest + path), exist_ok=True)
+    font.save(dest + path)
+    os.chmod(dest + path, 0o644)
+    print(f'   {name}: unmapped {dropped} emoji code points')
+PY

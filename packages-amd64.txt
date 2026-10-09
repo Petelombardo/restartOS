@@ -1,0 +1,6 @@
+# amd64 additions to packages.txt (build reads packages-$(dpkg --print-architecture).txt)
+# Untested starting point: Debian's firmware set (needs non-free-firmware in the
+# host's apt sources) and CPU microcode.
+firmware-linux-free firmware-misc-nonfree firmware-realtek firmware-iwlwifi
+firmware-amd-graphics firmware-mediatek
+intel-microcode amd64-microcode

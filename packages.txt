@@ -1,0 +1,40 @@
+# Seed packages for the restartOS 15 (trixie) system.img.
+# Depends/Pre-Depends are resolved against this host's dpkg database, so every
+# package here must be installed on the build host.
+
+# Core
+base-files base-passwd libc-bin
+bash dash coreutils debianutils diffutils findutils grep sed gzip tar less
+hostname procps ncurses-base ncurses-bin
+util-linux mount kmod
+systemd systemd-sysv udev dbus libpam-systemd
+login login.defs passwd libpam-modules libpam-modules-bin libpam-runtime
+sudo locales tzdata
+# Needed to replay addon maintainer scripts at boot (/scripts/postinst-run)
+perl-base dpkg adduser ucf debconf init-system-helpers
+
+# Networking
+network-manager wpasupplicant systemd-resolved iproute2 iputils-ping
+openssh-server openssh-client ca-certificates curl wget
+wireguard-tools iptables rfkill netcat-traditional netcat-openbsd
+
+# Storage
+e2fsprogs dosfstools ntfs-3g fdisk parted dmsetup lvm2 cryptsetup-bin sshfs
+squashfs-tools
+# mkfs/fsck for the other common filesystems (kernel drivers are in the board kernel)
+exfatprogs btrfs-progs xfsprogs f2fs-tools
+# data recovery: ddrescue
+gddrescue
+
+# Tools
+rsync pv lz4 zstd xz-utils bzip2 unzip file psmisc lsof pciutils usbutils
+nano vim-tiny htop bash-completion figlet fastfetch kbd
+chrony haveged sysstat
+
+# mDNS: publish restartos.local, resolve other .local hosts
+avahi-daemon avahi-utils libnss-mdns
+
+# Network diagnostics (nmap without its NSE scripts, see collect.py)
+bind9-dnsutils bind9-host nmap bmon tcpdump mtr-tiny
+
+# Firmware and other per-architecture seeds: packages-<arch>.txt

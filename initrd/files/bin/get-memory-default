@@ -1,0 +1,12 @@
+#!/bin/sh
+TOTALMEM=`cat /proc/meminfo | grep "MemTotal" | sed -e 's/^MemTotal: *\([0-9]*\).*$/\1/'`
+if [ $TOTALMEM -gt 500000 ]; then
+	HIGH=100
+	LOW=90
+else
+	HIGH=100
+	LOW=68
+fi
+RECOMMENDED=$(($TOTALMEM * $LOW))
+RECOMMENDED="$(($RECOMMENDED / $HIGH))"k
+echo $RECOMMENDED

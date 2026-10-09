@@ -1,0 +1,76 @@
+#!/bin/bash
+# Build a restartOS 15 addon from a recipe in addons/<name>/:
+#   packages.txt   packages to include (deps already in the base images are skipped)
+#   bases          optional: images this addon sits on, one per line
+#                  (default /builds/packages/system.img)
+#   overlay/       extra files/symlinks copied on top (configs, unit enables, ...)
+#                  anything under overlay/home/<user>/ is owned by that user
+#   post-build     optional bash script run last with $DEST set, for content that
+#                  doesn't come from a .deb (vendor binaries, tarballs, ...)
+#
+# usage: sudo ./build-addon <name>
+#   then: cd /builds/static-addons-<name> && ./compress "comment"
+set -e -o pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+NAME=$1
+A=$HERE/addons/$NAME
+DEST=/builds/static-addons-$NAME
+
+[ -n "$NAME" ] && [ -f "$A/packages.txt" ] || { echo "usage: $0 <name>   (needs $HERE/addons/<name>/packages.txt)"; exit 1; }
+if [ "$(id -u)" -ne 0 ]; then
+	echo "Run as root (sudo $0 $NAME) so file ownership and setuid bits are copied exactly."
+	exit 1
+fi
+
+if [ -d "$DEST" ] && [ ! -f "$DEST/scripts/packages/static-addons-$NAME" ]; then
+	echo "$DEST exists but isn't a v15 addon (no /scripts/packages manifest)."
+	echo "Move it aside first, e.g.:  sudo mv $DEST $DEST.v14"
+	exit 1
+fi
+
+# Build into $DEST.building and swap it in at the end: an interrupted build
+# leaves the previous one intact. Step out first, in case we were started
+# from inside it.
+cd /
+FINAL=$DEST
+DEST=$FINAL.building
+rm -rf "$DEST"
+
+if [ -f "$A/bases" ]; then
+	BASES=$(grep -v '^#' "$A/bases" | tr '\n' ' ')
+	export BASES
+	echo "== Bases: $BASES"
+fi
+
+echo "== create-package $NAME"
+DEST=$DEST /builds/scripts/create-package "$NAME" $(grep -v '^#' "$A/packages.txt") | grep -v "^'/.*' -> '/"
+
+if [ -d "$A/overlay" ]; then
+	echo "== Applying overlay"
+	cp -a "$A/overlay/." "$DEST/"
+	(cd "$A/overlay" && find . -mindepth 1) | while read -r p; do
+		case "$p" in
+			./home/?*)     # the user's home dir and everything in it belong to that user
+				u=$(echo "$p" | cut -d/ -f3)
+				ids=$(awk -F: -v u="$u" '$1 == u {print $3 ":" $4}' /builds/system/etc/passwd)
+				chown -h "${ids:-1000:1000}" "$DEST/$p" ;;
+			*)
+				chown -h root:root "$DEST/$p" ;;
+		esac
+	done
+fi
+
+if [ -f "$A/post-build" ]; then
+	echo "== post-build"
+	DEST=$DEST bash -e "$A/post-build"
+fi
+
+echo "== Replacing $FINAL"
+rm -rf "$FINAL"
+mv "$DEST" "$FINAL"
+DEST=$FINAL
+
+echo
+echo "Done: $DEST ($(du -sh "$DEST" | cut -f1))"
+echo "To package it:  cd $DEST && ./compress \"comment\""

@@ -1,0 +1,3 @@
+# restartOS 15 ai addon: Claude Code + pi (coding agents). The tools themselves
+# aren't .debs; post-build copies them from this host's installs.
+git

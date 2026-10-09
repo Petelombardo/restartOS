@@ -1,0 +1,87 @@
+#!/usr/bin/env python3
+import json
+import sys
+import shutil
+from pathlib import Path
+
+def add_launcher(name, launcher, icon):
+    """Add a new launcher to waybar configuration."""
+    config_path = Path.home() / ".config/waybar/config"
+    style_path = Path.home() / ".config/waybar/style.css"
+    
+    # Create backups
+    shutil.copy2(config_path, str(config_path) + ".backup")
+    shutil.copy2(style_path, str(style_path) + ".backup")
+    
+    try:
+        # Read the current config
+        with open(config_path) as f:
+            config = json.load(f)
+        
+        # Add the new module configuration
+        module_name = f"custom/{name}"
+        config[module_name] = {
+            "format": " ",
+            "on-click": launcher,
+            "tooltip": "true",
+            "tooltip-format": name.capitalize()
+        }
+        
+        # Update modules-left
+        if "modules-left" in config:
+            modules = config["modules-left"]
+            # Find taskbar position
+            try:
+                taskbar_pos = modules.index("wlr/taskbar")
+                # Insert new module before taskbar
+                modules.insert(taskbar_pos, module_name)
+            except ValueError:
+                # If taskbar not found, append to end
+                modules.append(module_name)
+            config["modules-left"] = modules
+        
+        # Write updated config
+        with open(config_path, 'w') as f:
+            json.dump(config, f, indent=4)
+        
+        # Add CSS
+        css_content = f"""
+#custom-{name} {{
+    font-family: "JetBrainsMono Nerd Font";
+    font-size: 12px;
+    padding-left: 20px;
+    padding-right: 20px;
+    transition: all 0.25s cubic-bezier(0.165, 0.84, 0.44, 1);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-image: url('{icon}');
+    background-size: contain;
+}}"""
+        
+        with open(style_path, 'a') as f:
+            f.write(css_content)
+        
+        print(f"Successfully added {name} launcher to waybar configuration!")
+        print("Don't forget to restart waybar for changes to take effect.")
+        
+        # Remove backups
+        Path(str(config_path) + ".backup").unlink()
+        Path(str(style_path) + ".backup").unlink()
+        
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        print("Restoring backups...")
+        shutil.copy2(str(config_path) + ".backup", config_path)
+        shutil.copy2(str(style_path) + ".backup", style_path)
+        sys.exit(1)
+
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: add-waybar-launcher [name] [launcher] [icon]")
+        sys.exit(1)
+    
+    name, launcher, icon = sys.argv[1:4]
+    add_launcher(name, launcher, icon)
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,111 @@
+#!/bin/bash
+# Refresh the userspace pieces of a restartOS initrd from THIS host so they match
+# each other (udev daemon vs. its rules, kmod vs. the depmod index, glibc vs. libs).
+# Runs unprivileged; ownership inside the cpio is recorded as root via `unshare -r`.
+#
+# usage: ./update-initrd <in-initrd.img> <out-initrd.img>   unpack, update, repack
+#        sudo ./update-initrd <extracted-initrd-dir>           update an unpacked tree in place
+set -e
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+if [ -d "$1" ] && [ -z "$2" ]; then
+	T=$(realpath "$1")
+	IN=""
+	[ -x "$T/init" ] && [ -d "$T/scripts" ] || { echo "'$T' doesn't look like an unpacked initrd"; exit 1; }
+else
+	IN=$(realpath "$1")
+	OUT=$(realpath -m "$2")
+	[ -f "$IN" ] && [ -n "$2" ] || { sed -n '2,8p' "$0"; exit 1; }
+	T=$HERE/work/initrd
+fi
+
+case $(dpkg --print-architecture) in
+	arm64) MULTIARCH=aarch64-linux-gnu; LDSO=ld-linux-aarch64.so.1 ;;
+	amd64) MULTIARCH=x86_64-linux-gnu; LDSO=ld-linux-x86-64.so.2 ;;
+esac
+LIBDIR=usr/lib/$MULTIARCH
+
+# Binaries to take from the host (path inside initrd == canonical host path)
+BINARIES="usr/bin/udevadm usr/bin/kmod usr/lib/udev/ata_id usr/lib/udev/scsi_id"
+# Libraries udev 257 dlopen()s instead of linking (ldd can't see them)
+DLOPEN="$LIBDIR/libkmod.so.2"
+
+if [ -n "$IN" ]; then
+	rm -rf "$T"
+	mkdir -p "$T"
+	cd "$T"
+	echo "== Unpacking $IN"
+	case "$(file -b "$IN")" in
+		gzip*) gunzip -c "$IN" | cpio -id --quiet ;;
+		Zstandard*) zstd -dc "$IN" | cpio -id --quiet ;;
+		*) echo "Unsupported initrd format: $(file -b "$IN")"; exit 1 ;;
+	esac
+else
+	cd "$T"
+	echo "== Updating $T in place"
+fi
+
+copy_file() {   # host path -> same canonical path in initrd, replacing symlinks
+	local src=$1 dst=${1#/}
+	mkdir -p "$(dirname "$dst")"
+	rm -f "$dst"
+	cp -L --preserve=mode,timestamps "$src" "$dst"
+	echo "   $dst"
+}
+
+copy_lib() {    # host lib (by soname path) -> real versioned file + soname symlink; drops stale versions
+	local soname=$1 real dir
+	real=$(realpath "$soname")
+	dir=$(dirname "$soname" | sed -e 's#^/lib/#/usr/lib/#' -e 's#^/##')
+	mkdir -p "$dir"
+	find "$dir" -maxdepth 1 -name "$(basename "$soname")*" ! -name "$(basename "$real")" -delete
+	cp --preserve=mode,timestamps "$real" "$dir/"
+	[ "$(basename "$real")" != "$(basename "$soname")" ] && ln -sfn "$(basename "$real")" "$dir/$(basename "$soname")"
+	echo "   $dir/$(basename "$soname") -> $(basename "$real")"
+}
+
+echo "== Updating binaries"
+for b in $BINARIES; do
+	copy_file "/$b"
+done
+
+echo "== Updating glibc (libraries the initrd already carries)"
+for f in $(dpkg -L libc6 | grep -E "^/usr/lib/$MULTIARCH/[^/]+\.so[.0-9]*$"); do
+	[ -e "$LIBDIR/$(basename "$f")" ] && copy_lib "$f"
+done
+copy_file /usr/lib/$MULTIARCH/$LDSO
+ln -sfn $MULTIARCH/$LDSO usr/lib/$LDSO
+
+echo "== Updating shared library dependencies"
+LIBS=$( { for b in $BINARIES; do ldd "/$b"; done; for d in $DLOPEN; do echo "/$d"; ldd "/$d"; done; } |
+	grep -oE "/[^ ]+\.so[.0-9]*" | sort -u)
+for l in $LIBS; do
+	case "$l" in */$LDSO) continue ;; esac
+	copy_lib "$l"
+done
+
+echo "== Rebuilding ld.so.cache"
+unshare -r /usr/sbin/ldconfig -r .
+
+echo "== Checking every ELF in the initrd for missing libraries"
+MISSING=$(unshare -r /usr/sbin/chroot . /bin/sh -c '
+	for f in $(find / -xdev -type f \( -perm -u+x -o -name "*.so*" \)); do
+		head -c4 "$f" | grep -q ELF || continue
+		/lib/'"$LDSO"' --list "$f" | grep "not found" | sed -e "s#^#$f: #"
+	done' 2>/dev/null | sort -u)
+if [ -n "$MISSING" ]; then
+	echo "$MISSING"
+	echo "!! Unresolved libraries above"
+fi
+
+echo "== Smoke test"
+unshare -r /usr/sbin/chroot . /bin/sh -c 'udevadm --version; kmod --version | head -1; /lib/systemd/systemd-udevd --version | head -1; /sbin/modprobe -S '"$(ls usr/lib/modules | head -1)"' --show-depends virtio_blk'
+
+if [ -z "$IN" ]; then
+	echo "== Done (tree updated in place; compress it as usual)"
+	exit 0
+fi
+
+echo "== Packing $OUT"
+unshare -r sh -c 'find . | cpio --create --format=newc --quiet | gzip -9 -c' > "$OUT"
+ls -la "$OUT"

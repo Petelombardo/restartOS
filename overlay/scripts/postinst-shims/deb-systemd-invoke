@@ -1,0 +1,7 @@
+#!/bin/sh
+# postinst-run shim: never block on a unit start while the boot is still running.
+while [ "${1#--}" != "$1" ]; do
+	[ "$1" = "--user" ] && exit 0
+	shift
+done
+exec systemctl --no-block "$@"

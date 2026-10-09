@@ -1,0 +1,3 @@
+#!/bin/sh
+# postinst-run shim: nothing to do on restartOS (no dpkg history, no initramfs).
+exit 0

@@ -1,0 +1,173 @@
+#!/bin/bash
+# Create (or add to) a restartOS addon from installed Debian packages.
+#
+# usage: create-package [name] [package ...]      (prompts for anything missing)
+#
+# Environment:
+#   BASES="img ..."  lower layers this addon sits on (default /builds/packages/system.img).
+#                    e.g. BASES="/builds/packages/system.img /builds/packages/static-addons-mesa.img"
+#
+# Every restartOS image lists the debs it contains in /scripts/packages/<image>
+# (system, static-addons-labwc, ...); on a running system the overlay merges the
+# directory, so it shows every layer and any overlaps. The requested packages are
+# resolved against this host's dpkg db; dependencies already listed in a base
+# image's manifest are skipped, everything else goes into this addon, and the
+# addon gets its own manifest.
+#
+# Copies each package's files into /builds/static-addons-<name>/, then captures
+# what dpkg would have done at install time so it happens at boot instead:
+#   scripts/postinst.d/<pkg>.preinst|postinst   the package's maintainer scripts
+#   scripts/postinst.d/<pkg>.accounts           system users/groups it needs (build host's ids)
+#   scripts/startup/00-postinst-<pkg>           runs /scripts/postinst-run <pkg> (from system.img)
+#   scripts/postinst.d/triggers.static-addons-<name>
+#                                               dpkg file triggers this addon's files activate;
+#                                               system.img's 01-postinst-triggers runs them
+
+if [ "$1" != "" ]; then
+	DIR="$1"
+	shift
+else
+	echo "Enter the new package name"
+	read DIR
+fi
+DEST=${DEST:-/builds/static-addons-$DIR}
+BASES=${BASES:-/builds/packages/system.img}
+RESOLVE=${RESOLVE:-/builds/minimal-system/resolve.py}
+MANIFEST=scripts/packages/static-addons-$DIR
+TMP=$(mktemp -d)
+trap 'rm -rf $TMP' EXIT
+
+# Packages already shipped by the layers below this addon
+: > $TMP/provided
+for BASE in $BASES; do
+	FOUND=0
+	for M in $(unsquashfs -l -d '' "$BASE" scripts/packages 2>/dev/null | grep '^/scripts/packages/.'); do
+		unsquashfs -cat "$BASE" "${M#/}" >> $TMP/provided && FOUND=1
+	done
+	if [ $FOUND -eq 0 ]; then
+		echo "No package manifest in $BASE (it needs /scripts/packages/<image>)"
+		exit 1
+	fi
+	echo "Base $(basename $BASE): $(wc -l < $TMP/provided) packages so far"
+done
+
+if [ ! -d $DEST ]; then
+	mkdir $DEST
+	for l in /lib /lib64 /bin /sbin; do
+		[ -e $l ] && cp -dp $l $DEST/
+	done
+	rsync -ogpd /usr $DEST/
+	rsync -ogpd /usr/ $DEST/usr/
+	ln -s /builds/scripts/compress $DEST/compress
+fi
+
+if [ "$1" != "" ]; then
+	PACKAGES="$*"
+else
+	echo "What packages do you want to pull from (list all of them on a single line): "
+	read PACKAGES
+fi
+
+# Resolve dependencies; anything the bases don't already provide goes in this addon
+python3 $RESOLVE --provided $TMP/provided $PACKAGES > $TMP/closure || exit 1
+PACKAGES=$(cat $TMP/closure)
+if [ -z "$PACKAGES" ]; then
+	echo "Nothing to add: everything is already in the base image(s)"
+	exit 0
+fi
+echo "Packages going into static-addons-$DIR ($(echo $PACKAGES | wc -w)):"
+echo "$PACKAGES" | fmt -w 100 | sed -e 's/^/    /'
+
+# Warn when the host has a different version than a base image was built with
+dpkg-query -W -f='${Package} ${Version}\n' $(cut -d' ' -f1 $TMP/provided) 2>/dev/null | sort > $TMP/host-versions
+sort -u $TMP/provided | grep ' ' | comm -13 $TMP/host-versions - | while read -r P V; do
+	echo "WARNING: base has $P $V but this host now has $(dpkg-query -W -f='${Version}' $P 2>/dev/null)"
+done
+
+echo "Copying package contents to $DEST"
+for i in `dpkg -L $PACKAGES | grep -v "/doc/" | grep -v "/lintian/" | grep -v "/man/" | grep -v "/locale/"`
+do
+	if [ -L "$i" ] || [ ! -d "$i" ]; then	# symlinks to dirs too (groff's current, site-tmac)
+		cp -apv --parents "$i" $DEST/
+	fi
+done
+
+# System accounts (uid/gid 100-999) on this host that a package needs: anything
+# owning one of its files, or named in its maintainer scripts / sysusers.d.
+accounts_for() {
+	local pkg=$1 scripts=$2 ids names
+	ids=$(dpkg -L $pkg | while read -r f; do [ -e "$f" ] && stat -c '%u %g' "$f"; done | tr ' ' '\n' | sort -un)
+	{
+		for id in $ids; do
+			[ $id -ge 100 ] && [ $id -lt 1000 ] || continue
+			getent passwd $id
+			getent group $id | sed -e 's/^/G/'
+		done
+		getent passwd | awk -F: '$3 >= 100 && $3 < 1000' | while IFS= read -r e; do
+			grep -qw -- "${e%%:*}" $scripts && echo "$e"
+		done
+		getent group | awk -F: '$3 >= 100 && $3 < 1000' | while IFS= read -r e; do
+			grep -qw -- "${e%%:*}" $scripts && echo "G$e"
+		done
+	} | sort -u | while IFS= read -r e; do
+		if [ "${e:0:1}" = "G" ]; then
+			echo "group $(echo "${e:1}" | cut -d: -f1-3):"
+		else
+			echo "user $e"
+			getent group "$(echo "$e" | cut -d: -f4)" | cut -d: -f1-3 | sed -e 's/^/group /' -e 's/$/:/'
+		fi
+	done | sort -u
+}
+
+mkdir -p $DEST/scripts/postinst.d $DEST/scripts/startup $(dirname $DEST/$MANIFEST)
+
+# dpkg file triggers ("interest <path>") this addon's files fall under, as
+# "<handler package> <path>". Handlers in this addon get their postinst copied
+# below; handlers in system.img ship theirs there.
+TRIGGERS=$DEST/scripts/postinst.d/triggers.static-addons-$DIR
+for T in /var/lib/dpkg/info/*.triggers; do
+	H=$(basename $T .triggers); H=${H%%:*}
+	grep -E "^interest[a-z-]* +/" $T | awk '{print $2}' | while read -r WATCH; do
+		dpkg -L $PACKAGES 2>/dev/null | grep -q "^$WATCH/" && echo "$H $WATCH"
+	done
+done | sort -u > $TRIGGERS.new
+[ -f $TRIGGERS ] && cat $TRIGGERS >> $TRIGGERS.new
+sort -u $TRIGGERS.new > $TRIGGERS; rm -f $TRIGGERS.new
+[ -s $TRIGGERS ] && { echo "File triggers to run at boot:"; sed -e 's/^/    /' $TRIGGERS; } || rm -f $TRIGGERS
+{ dpkg-query -W -f='${Package} ${Version}\n' $PACKAGES; [ -f $DEST/$MANIFEST ] && cat $DEST/$MANIFEST; } |
+	sort -s -u -k1,1 > $TMP/manifest     # new versions first, so they win over older entries
+cp $TMP/manifest $DEST/$MANIFEST
+echo "Manifest: /$MANIFEST ($(wc -l < $DEST/$MANIFEST) packages)"
+
+for PKG in $PACKAGES; do
+	PKG=${PKG%%:*}
+	INFO=/var/lib/dpkg/info/$PKG
+	[ -f $INFO.list ] || INFO=/var/lib/dpkg/info/$PKG:$(dpkg --print-architecture)
+	SCRIPTS=""
+	for s in preinst postinst; do
+		if [ -f $INFO.$s ]; then
+			cp -p $INFO.$s $DEST/scripts/postinst.d/$PKG.$s
+			SCRIPTS="$SCRIPTS $INFO.$s"
+		fi
+	done
+	SYSUSERS=$(dpkg -L $PKG | grep "/sysusers.d/")
+	accounts_for $PKG "$SCRIPTS $SYSUSERS /dev/null" > $DEST/scripts/postinst.d/$PKG.accounts
+	[ -s $DEST/scripts/postinst.d/$PKG.accounts ] || rm -f $DEST/scripts/postinst.d/$PKG.accounts
+
+	if [ -n "$SCRIPTS" ] || [ -f $DEST/scripts/postinst.d/$PKG.accounts ]; then
+		printf '#!/bin/bash\n/scripts/postinst-run %s\n' "$PKG" > $DEST/scripts/startup/00-postinst-$PKG
+		chmod 755 $DEST/scripts/startup/00-postinst-$PKG
+		echo "Boot-time install steps for $PKG:$(ls $DEST/scripts/postinst.d/ | grep "^$PKG\." | sed -e "s/^$PKG\./ /" | tr -d '\n')"
+
+		# The package's services must wait for restartos.service, which runs the
+		# hook above (accounts, dirs, permissions). Early-boot units are skipped
+		# because restartos.service itself starts after them.
+		for UNIT in $(dpkg -L $PKG | grep -E "^(/usr)?/lib/systemd/system/[^/]+\.service$"); do
+			grep -qE "^DefaultDependencies=no|^WantedBy=sysinit.target|^Before=sysinit.target" $UNIT && continue
+			mkdir -p $DEST/etc/systemd/system/$(basename $UNIT).d
+			printf '[Unit]\n# Accounts/dirs from /scripts/startup/00-postinst-%s must exist first\nAfter=restartos.service\n' $PKG \
+				> $DEST/etc/systemd/system/$(basename $UNIT).d/10-restartos-postinst.conf
+			echo "    $(basename $UNIT) ordered after restartos.service"
+		done
+	fi
+done

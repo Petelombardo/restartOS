@@ -1,0 +1,4 @@
+# arm64 additions to packages.txt (build reads packages-$(dpkg --print-architecture).txt)
+# Firmware (Armbian host repo)
+armbian-firmware
+# (MT7961 wifi/BT firmware is overridden by newer copies in overlay-arm64/usr/lib/firmware/mediatek)

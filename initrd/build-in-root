@@ -1,0 +1,11 @@
+#!/bin/sh
+# Runs inside the Debian trixie build root (chrooted into by build-initrd).
+# usage: build-in-root <kernel version> <output file name>
+set -e
+KVER=$1 OUT=$2
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends initramfs-tools busybox pv util-linux kmod udev zstd > /dev/null
+apt-get upgrade -y -qq > /dev/null    # keep udev/kmod/glibc in step with the trixie base image
+echo "== mkinitramfs $KVER (initramfs-tools $(dpkg-query -W -f '${Version}' initramfs-tools), udev $(dpkg-query -W -f '${Version}' udev))"
+mkinitramfs -d /recipe/conf -o "/out/$OUT" "$KVER"
