@@ -9,16 +9,33 @@
 # re-adds each one as a new output; rc.xml has autoEnableOutputs=no so labwc
 # leaves it off, and kanshi (the only thing that enables outputs) is stopped
 # while idle, so the monitor gets no signal and stays asleep.
-# labwc 0.8.3 also leaves windows sized over waybar after a reconnect; a waybar
-# reload (SIGUSR2) makes it re-fit them (waybar launchers use setsid -f, so
-# reloading doesn't kill apps). A refit while swaylock is up doesn't stick, so
-# 'lock' also refits once swaylock exits.
+# labwc 0.8.3 also leaves windows sized over waybar after a reconnect; a fresh
+# waybar makes it re-fit them (waybar launchers use setsid -f, so restarting it
+# doesn't kill apps). A refit while swaylock is up doesn't stick, so 'lock' also
+# refits once swaylock exits.
+# Refits are debounced: resume, every reconnect and the unlock each ask for one,
+# only the last request runs, and it restarts waybar instead of reloading it
+# (SIGUSR2 reloads landing while outputs change left waybar with doubled bars).
 F=${XDG_RUNTIME_DIR:-/tmp}/restartos-screen-off
-refit() { sleep "${1:-1}"; pkill -USR2 -x waybar; }
+R=${XDG_RUNTIME_DIR:-/tmp}/restartos-refit
+refit() {   # refit <delay>: restart waybar once nothing has asked again for <delay>s
+	local me=$$.$(date +%s%N)
+	echo "$me" > "$R"
+	setsid -f sh -c '
+		sleep "$1"
+		[ "$(cat "$2" 2>/dev/null)" = "$3" ] || exit 0
+		pkill -x waybar
+		for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x waybar > /dev/null || break; sleep 0.2; done
+		pkill -9 -x waybar 2>/dev/null
+		setsid -f waybar > /dev/null 2>&1' refit "${1:-1}" "$R" "$me" < /dev/null > /dev/null 2>&1
+}
 case $1 in
 lock)
 	pgrep -x swaylock > /dev/null || swaylock -f -c 000000
-	setsid -f sh -c 'while pgrep -x swaylock > /dev/null; do sleep 0.2; done; sleep 0.3; pkill -USR2 -x waybar' > /dev/null 2>&1 ;;
+	setsid -f "$0" unlocked < /dev/null > /dev/null 2>&1 ;;
+unlocked)   # (internal) wait for swaylock to exit, then refit
+	while pgrep -x swaylock > /dev/null; do sleep 0.2; done
+	refit 0.3 ;;
 idle)
 	touch "$F"
 	pkill -x kanshi
@@ -27,7 +44,7 @@ resume)
 	rm -f "$F"
 	pgrep -x kanshi > /dev/null || setsid -f kanshi > /dev/null 2>&1
 	wlopm --on '*'
-	refit 1 ;;
+	refit 1.5 ;;
 changed)
 	if [ -e "$F" ]; then wlopm --off '*'; else refit 2; fi ;;
 *)
