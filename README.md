@@ -171,6 +171,9 @@ USEUINITRD=1                       # wrap initrd.img with mkimage
 TESTBUILD=1                        # appends -test to the name
 #MBTYPE=MSDOS                      # default GPT
 #EXTRACMDS="..."                   # run with the partition still mounted
+#MKFSOPTS="-O ^orphan_file"
+                                   # extra mkfs.ext2/ext4 options; older u-boot
+                                   # (e.g. odroidhc4) may not read all of trixie's ext4 defaults
 ```
 
 `make` writes `mbr.img`, sizes and creates the partition, unpacks
