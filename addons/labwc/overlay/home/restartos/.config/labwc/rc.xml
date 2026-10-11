@@ -66,6 +66,20 @@
     <keybind key="W-F4">
       <action name="None" />
     </keybind>
+    <!--
+      Re-fit every maximized window (incl. covered ones / other desktops) to the
+      current usable area. restartos-display sends this with wtype after resume:
+      labwc 0.8.3 has no IPC, and an output nudge only re-fits the visible window.
+    -->
+    <keybind key="W-A-S-F12">
+      <action name="ForEach">
+        <query maximized="both" />
+        <then>
+          <action name="UnMaximize" />
+          <action name="Maximize" />
+        </then>
+      </action>
+    </keybind>
   </keyboard>
 
   <mouse>
@@ -77,5 +91,16 @@
       </mousebind>
     </context>
   </mouse>
+
+  <!--
+    Open app windows maximized (not dialogs: Wayland windows with a parent or
+    fixed size are type "dialog"). Only maximized windows keep clear of waybar
+    after resume - see the W-A-S-F12 keybind above.
+  -->
+  <windowRules>
+    <windowRule identifier="*" type="normal">
+      <action name="Maximize" />
+    </windowRule>
+  </windowRules>
 
 </labwc_config>

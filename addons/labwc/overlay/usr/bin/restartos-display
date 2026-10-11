@@ -16,6 +16,9 @@
 # Refits are debounced: resume, every reconnect and the unlock each ask for one,
 # only the last request runs, and it restarts waybar instead of reloading it
 # (SIGUSR2 reloads landing while outputs change left waybar with doubled bars).
+# Even so, maximized windows (covered ones especially) sometimes stay over the
+# new waybar after resume, so once it's up the refit presses W-A-S-F12 via wtype:
+# an rc.xml ForEach keybind that un- and re-maximizes every maximized window.
 F=${XDG_RUNTIME_DIR:-/tmp}/restartos-screen-off
 R=${XDG_RUNTIME_DIR:-/tmp}/restartos-refit
 refit() {   # refit <delay>: restart waybar once nothing has asked again for <delay>s
@@ -27,7 +30,9 @@ refit() {   # refit <delay>: restart waybar once nothing has asked again for <de
 		pkill -x waybar
 		for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x waybar > /dev/null || break; sleep 0.2; done
 		pkill -9 -x waybar 2>/dev/null
-		setsid -f waybar > /dev/null 2>&1' refit "${1:-1}" "$R" "$me" < /dev/null > /dev/null 2>&1
+		setsid -f waybar > /dev/null 2>&1
+		sleep 1.5
+		wtype -M logo -M alt -M shift -k F12 -m shift -m alt -m logo' refit "${1:-1}" "$R" "$me" < /dev/null > /dev/null 2>&1
 }
 case $1 in
 lock)

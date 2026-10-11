@@ -5,7 +5,7 @@
 labwc xwayland greetd tuigreet dbus-user-session
 
 # Used by ~/.config/labwc/autostart
-sway-notification-center swaybg swayidle swaylock wlopm waybar wlr-randr kanshi
+sway-notification-center swaybg swayidle swaylock wlopm waybar wlr-randr kanshi wtype
 xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
 
 # Used by ~/.config/labwc/rc.xml keybinds
