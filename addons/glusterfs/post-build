@@ -68,7 +68,9 @@ while read -r f soname path; do
 	"$DEST"/*) continue ;;
 	esac
 	# dpkg records the path as the package shipped it: /lib/... or /usr/lib/...
-	pkg=$( { dpkg -S "$path" || dpkg -S "${path#/usr}" || dpkg -S "/usr$path"; } 2>/dev/null | head -1 | cut -d: -f1)
+	# (t64 transitions leave "diversion by ..." lines for the other spelling)
+	pkg=$(dpkg -S "${path#/usr}" "/usr${path#/usr}" 2>/dev/null |
+		grep -v '^diversion by' | head -1 | cut -d: -f1)
 	if [ -z "$pkg" ]; then
 		echo "   copying $path (no package owns it)"
 		cp -L --preserve=mode "$path" "$DEST/usr/lib/$MULTI/$soname"
