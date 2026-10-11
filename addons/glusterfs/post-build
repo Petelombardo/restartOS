@@ -1,0 +1,85 @@
+# Installs GlusterFS from a source tree that's already configured and built
+# (see /builds/source/glusterfs/build), then checks that every shared library
+# the installed binaries need comes from this addon or the images below it.
+# Runs as root from build-addon with $DEST set.
+#
+#   GLUSTER_SRC=<tree>  source tree to install from (default: newest
+#                       /builds/source/glusterfs/glusterfs-*)
+SRC=${GLUSTER_SRC:-$(ls -d /builds/source/glusterfs/glusterfs-*/ | sort -V | tail -1)}
+SRC=${SRC%/}
+[ -x "$SRC/cli/src/gluster" ] && [ -f "$SRC/glusterfsd/src/glusterfsd" ] || {
+	echo "   $SRC isn't built yet (configure + make there first)"; exit 1; }
+VER=$(sed -n "s/^PACKAGE_VERSION='\(.*\)'/\1/p" "$SRC/config.status")
+echo "   glusterfs $VER from $SRC"
+
+# install-strip: debs ship stripped binaries too. configure works out pythondir as
+# .../python3.1/site-packages (it cuts the version to 3 chars); Debian's python3
+# only looks in dist-packages.
+PY=/usr/lib/python3/dist-packages
+make -C "$SRC" -s install-strip DESTDIR="$DEST" pythondir=$PY pyexecdir=$PY >/dev/null
+
+# Merged /usr: the base has /sbin -> usr/sbin etc., and /var/run -> /run. A real
+# directory here would shadow those symlinks in the overlay, so fold them in.
+for d in bin sbin lib; do
+	if [ -d "$DEST/$d" ] && [ ! -L "$DEST/$d" ]; then
+		cp -a "$DEST/$d/." "$DEST/usr/$d/"
+		rm -rf "${DEST:?}/$d"
+		ln -s usr/$d "$DEST/$d"
+	fi
+done
+[ -L "$DEST/var/run" ] || rm -rf "$DEST/var/run"   # /run/gluster: overlay tmpfiles.d
+
+# Build-time and non-Linux leftovers; systemd units replace the sysv script
+rm -rf "$DEST/usr/include" "$DEST/Library" "$DEST/etc/init.d/glusterd"
+find "$DEST/usr/lib" \( -name '*.la' -o -name '*.a' \) -delete
+rm -f "$DEST"/usr/lib/*/pkgconfig/{glusterfs-api,libgfchangelog}.pc
+rmdir "$DEST"/usr/lib/*/pkgconfig "$DEST/etc/init.d" 2>/dev/null || true
+
+# glusterd at boot. Its state (/var/lib/glusterd: node UUID, peers, volumes) is on
+# the tmpfs overlay until it's made persistent on the device.
+mkdir -p "$DEST/etc/systemd/system/multi-user.target.wants"
+ln -sf /usr/lib/systemd/system/glusterd.service "$DEST/etc/systemd/system/multi-user.target.wants/"
+
+# Library check. ldd runs on the build host with the addon's own libs first; each
+# resolved library must be in $DEST, or belong to a package in this addon's or a
+# base image's manifest. Libraries not from any package (e.g. something in
+# /usr/local) are copied in; libraries from packages nobody ships stop the build.
+MULTI=$(gcc -print-multiarch 2>/dev/null || dpkg-architecture -qDEB_HOST_MULTIARCH)
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+cat "$DEST"/scripts/packages/* > "$TMP/provided"
+for B in ${BASES:-/builds/packages/system.img}; do
+	for M in $(unsquashfs -l -d '' "$B" scripts/packages | grep '^/scripts/packages/.'); do
+		unsquashfs -cat "$B" "${M#/}" >> "$TMP/provided"
+	done
+done
+
+find "$DEST/usr/sbin" "$DEST/usr/bin" "$DEST/usr/libexec/glusterfs" "$DEST/usr/lib/$MULTI" \
+		-type f \( -perm -u+x -o -name '*.so*' \) 2>/dev/null |
+	while read -r f; do
+		[ "$(head -c4 "$f" | tail -c3)" = ELF ] || continue
+		LD_LIBRARY_PATH="$DEST/usr/lib/$MULTI" ldd "$f" | sed -n "s#^\s*\(\S*\) => \(.*\) (0x.*#$f \1 \2#p;s#^\s*\(\S*\) => not found#$f \1 NOTFOUND#p"
+	done | sort -u -k2,3 > "$TMP/libs"
+
+: > "$TMP/missing"
+while read -r f soname path; do
+	case "$path" in
+	NOTFOUND) echo "   !! ${f#$DEST} needs $soname: not found on this host"; echo "?$soname" >> "$TMP/missing"; continue ;;
+	"$DEST"/*) continue ;;
+	esac
+	# dpkg records the path as the package shipped it: /lib/... or /usr/lib/...
+	pkg=$( { dpkg -S "$path" || dpkg -S "${path#/usr}" || dpkg -S "/usr$path"; } 2>/dev/null | head -1 | cut -d: -f1)
+	if [ -z "$pkg" ]; then
+		echo "   copying $path (no package owns it)"
+		cp -L --preserve=mode "$path" "$DEST/usr/lib/$MULTI/$soname"
+	elif ! grep -q "^$pkg " "$TMP/provided"; then
+		echo "   !! $soname (for ${f#$DEST}) is in $pkg, which no image ships"
+		echo "$pkg" >> "$TMP/missing"
+	fi
+done < "$TMP/libs"
+
+if [ -s "$TMP/missing" ]; then
+	echo "   Add to addons/glusterfs/packages.txt and rebuild: $(grep -v '^?' "$TMP/missing" | sort -u | tr '\n' ' ')"
+	exit 1
+fi
+echo "   $(wc -l < "$TMP/libs") shared libraries checked, all provided"

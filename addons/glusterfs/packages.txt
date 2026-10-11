@@ -1,0 +1,13 @@
+# restartOS 15 glusterfs addon: GlusterFS built from source (/builds/source/glusterfs),
+# installed by post-build. This list is only its runtime libraries/tools from Debian;
+# deps already in system.img are skipped. post-build ldd-checks every installed
+# binary and stops with the packages to add here if anything is missing.
+libaio1t64 libxml2 libssl3t64 libuuid1 libacl1 libtirpc3t64 libreadline8t64
+libglib2.0-0t64 liburcu8t64 liburing2 libsqlite3-0 liblvm2cmd2.03
+# RDMA transport (rpc-transport/rdma.so)
+libibverbs1 librdmacm1t64
+# gluster's python tools (gsyncd/geo-replication, eventsd, gfind) and geo-rep's rsync
+python3 rsync
+# Optional python modules, not installed on the build host yet (apt install first):
+#   python3-prettytable  - gluster-mountbroker / cliutils table output
+#   python3-requests     - glustereventsd webhooks

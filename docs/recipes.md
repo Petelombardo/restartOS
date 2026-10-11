@@ -182,6 +182,16 @@ Current addons:
   `post-build` points the menu entry at it. A hidden `gpartedbin.desktop` gives the window
   its taskbar/titlebar icon (GTK's app_id is the binary name). The polkit rule still
   lets the stock pkexec path run without a password.
+* **glusterfs** — GlusterFS built from source, not from debs: configure + make in
+  `/builds/source/glusterfs/glusterfs-<ver>` first (`GLUSTER_SRC=` picks another tree).
+  `packages.txt` only lists its runtime libraries; `post-build` runs `make install-strip`
+  into the addon (python modules forced into `python3/dist-packages`, since configure
+  computes `python3.1/site-packages`), folds `/sbin` into `usr/sbin` and drops `/var/run`
+  so the base's merged-usr and `/run` symlinks aren't shadowed (`/run/gluster` comes from
+  tmpfiles.d), removes headers/static libs, and enables glusterd. It then ldd-checks every
+  ELF in the addon: libraries from packages no image ships stop the build with the list to
+  add to `packages.txt`; libraries no package owns are copied in. Persist `/var/lib/glusterd`
+  (node UUID, peers, volumes) on the device.
 
 To refresh claude/pi versions: update them on the host, then rebuild the ai addon.
 
