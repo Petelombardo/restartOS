@@ -1,0 +1,6 @@
+# GlusterFS 10.5: same recipe as addons/glusterfs (which builds the newest
+# source tree), pinned to the 10.5 tree. packages.txt and overlay/ are symlinks
+# to that recipe's. Build the tree first: autogen.sh, ../custom-configure, make
+# (the 10.5 tarball's config.guess/config.sub are stubs; autogen.sh replaces them).
+GLUSTER_SRC=${GLUSTER_SRC:-/builds/source/glusterfs/glusterfs-10.5}
+. "$(dirname "${BASH_SOURCE[0]}")/../glusterfs/post-build"

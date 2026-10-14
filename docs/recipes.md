@@ -191,7 +191,12 @@ Current addons:
   tmpfiles.d), removes headers/static libs, and enables glusterd. It then ldd-checks every
   ELF in the addon: libraries from packages no image ships stop the build with the list to
   add to `packages.txt`; libraries no package owns are copied in. Persist `/var/lib/glusterd`
-  (node UUID, peers, volumes) on the device.
+  (node UUID, peers, volumes) on the device. The unversioned addon takes the newest tree.
+* **glusterfs-10.5** — the glusterfs recipe pinned to the 10.5 tree: `packages.txt` and
+  `overlay/` are symlinks to glusterfs's, `post-build` sets `GLUSTER_SRC` and sources
+  glusterfs's. An alternative to the glusterfs addon, not a layer on it (same paths).
+  The 10.5 tarball's `config.guess`/`config.sub` are stubs: run `./autogen.sh` before
+  `../custom-configure`, or configure writes garbage triplets into the Makefiles.
 
 To refresh claude/pi versions: update them on the host, then rebuild the ai addon.
 
