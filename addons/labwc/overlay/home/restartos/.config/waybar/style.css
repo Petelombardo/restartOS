@@ -55,29 +55,26 @@ tooltip label {
   color: @content_main;
 }
 
-#workspaces {
-  color: transparent;
+/* desktop buttons (custom/desktopN, from restartos-workspaces) */
+#desktops {
   margin-right: 1px;
   margin-left: 1px;
 }
-#workspaces button {
-  padding: 1px 3px;
+#custom-desktop1, #custom-desktop2, #custom-desktop3, #custom-desktop4 {
+  padding: 1px 5px;
   color: @content_inactive;
   transition: all 0.25s cubic-bezier(0.165, 0.84, 0.44, 1);
 }
-#workspaces button.active {
+#custom-desktop1.active, #custom-desktop2.active, #custom-desktop3.active, #custom-desktop4.active {
   color: @content_main;
   border-bottom: 2px solid white;
 }
-#workspaces button.focused {
-  color: @bg_active;
-}
-#workspaces button.urgent {
+#custom-desktop1.urgent, #custom-desktop2.urgent, #custom-desktop3.urgent, #custom-desktop4.urgent {
   background:  rgba(255, 200, 0, 0.35);
   border-bottom: 2px dashed @warning_color;
   color: @warning_color;
 }
-#workspaces button:hover {
+#custom-desktop1:hover, #custom-desktop2:hover, #custom-desktop3:hover, #custom-desktop4:hover {
   background: @bg_hover;
   color: @content_main;
 }

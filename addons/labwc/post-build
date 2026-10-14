@@ -26,3 +26,20 @@ for name in ('DejaVuSans.ttf', 'DejaVuSans-Bold.ttf'):
     os.chmod(dest + path, 0o644)
     print(f'   {name}: unmapped {dropped} emoji code points')
 PY
+
+# restartos-workspaces: the waybar desktop buttons (src/restartos-workspaces.c).
+# Needs libwayland-dev and wayland-protocols on the build host.
+PROTO=/usr/share/wayland-protocols/staging/ext-workspace/ext-workspace-v1.xml
+if [ ! -f "$PROTO" ] || ! pkg-config --exists wayland-client; then
+	echo "   restartos-workspaces needs:  sudo apt install libwayland-dev wayland-protocols"
+	exit 1
+fi
+SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+wayland-scanner client-header "$PROTO" "$TMP/ext-workspace-v1-client-protocol.h"
+wayland-scanner private-code "$PROTO" "$TMP/ext-workspace-v1-protocol.c"
+mkdir -p "$DEST/usr/bin"
+gcc -O2 -Wall -s -I"$TMP" -o "$DEST/usr/bin/restartos-workspaces" \
+	"$SRC/restartos-workspaces.c" "$TMP/ext-workspace-v1-protocol.c" $(pkg-config --cflags --libs wayland-client)
+echo "   built restartos-workspaces"

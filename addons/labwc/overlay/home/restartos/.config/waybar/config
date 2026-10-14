@@ -16,7 +16,7 @@
     ],
     "modules-center": [],
     "modules-right": [
-        "wlr/workspaces",
+        "group/desktops",
         "cpu",
         "temperature",
         "memory",
@@ -70,14 +70,31 @@
         "ignore-list": [],
         "on-click": "activate"
     },
-    "wlr/workspaces": {
-        "disable-scroll": true,
-        "all-outputs": true,
-        "on-click": "activate",
-        "persistent_workspaces": {
-            "1": [],
-            "2": []
-        }
+    "group/desktops": {
+        "orientation": "horizontal",
+        "modules": ["custom/desktop1", "custom/desktop2", "custom/desktop3", "custom/desktop4"]
+    },
+    // one button per desktop in labwc/rc.xml (<desktops number="4" />); a button
+    // for a desktop that doesn't exist stays hidden. Super+1..4 / Ctrl+Super+arrows switch.
+    "custom/desktop1": {
+        "exec": "restartos-workspaces watch 1",
+        "return-type": "json",
+        "on-click": "restartos-workspaces activate 1"
+    },
+    "custom/desktop2": {
+        "exec": "restartos-workspaces watch 2",
+        "return-type": "json",
+        "on-click": "restartos-workspaces activate 2"
+    },
+    "custom/desktop3": {
+        "exec": "restartos-workspaces watch 3",
+        "return-type": "json",
+        "on-click": "restartos-workspaces activate 3"
+    },
+    "custom/desktop4": {
+        "exec": "restartos-workspaces watch 4",
+        "return-type": "json",
+        "on-click": "restartos-workspaces activate 4"
     },
     "tray": {
         "icon-size": 8,
