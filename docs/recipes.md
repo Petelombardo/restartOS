@@ -76,8 +76,13 @@ to always becomes `system.img`.
   * generates a config from /usr/share (sshd_config, chrony) → copy it in `build`
 * **Accounts:** restartos password defaults to `restartos` (`sudo PASSWORD=x ./build`
   bakes another); root is locked (restartos has NOPASSWD sudo); SSH password login is
-  on — headless boxes are found via avahi (`restartos.local`) and ssh'd into.
+  on — headless boxes are found via avahi and ssh'd into.
   MOTD `20-restartos` warns while the password is still the default.
+* **Hostname:** `restartos-hostname.service` (`/scripts/set-hostname`, early boot, before
+  NetworkManager and avahi) renames the stock `restartos` to `restartos-<last 2 MAC
+  octets>` (first physical NIC, wired preferred), e.g. `restartos-1a2b.local`, so several
+  machines on one LAN don't collide. A custom `/etc/hostname` (made persistent) or
+  `systemd.hostname=` on the kernel cmdline is left alone.
 * **MT7961 firmware** (MT7921U USB wifi/BT): `overlay-arm64/usr/lib/firmware/mediatek/` holds the
   three files from Debian `firmware-mediatek` 20250410-2 (MediaTek build 2024-11-06),
   overriding armbian-firmware's 2023-05-26 copies; both desktops' adapters had hung

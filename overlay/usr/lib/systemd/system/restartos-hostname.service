@@ -1,0 +1,14 @@
+[Unit]
+Description=restartOS unique hostname from MAC address
+DefaultDependencies=no
+After=systemd-udev-trigger.service local-fs.target
+Before=network-pre.target NetworkManager.service avahi-daemon.service systemd-hostnamed.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/scripts/set-hostname
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

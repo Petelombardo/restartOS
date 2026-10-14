@@ -166,7 +166,7 @@ echo "== Enabling units"
 systemctl --root="$R" set-default multi-user.target
 systemctl --root="$R" enable getty@tty1.service restartos.service restartos-shutdown.service \
 	NetworkManager.service systemd-resolved.service chrony.service haveged.service \
-	avahi-daemon.service
+	avahi-daemon.service restartos-hostname.service
 
 echo "== Building ld.so.cache"
 chroot "$R" /sbin/ldconfig
