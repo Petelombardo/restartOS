@@ -29,7 +29,7 @@ gddrescue
 # Tools
 rsync pv lz4 zstd xz-utils bzip2 unzip file psmisc lsof pciutils usbutils
 nano vim-tiny htop bash-completion figlet fastfetch kbd
-chrony haveged sysstat
+chrony haveged sysstat uuid
 
 # mDNS: publish restartos.local, resolve other .local hosts
 avahi-daemon avahi-utils libnss-mdns
