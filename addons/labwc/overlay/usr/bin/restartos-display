@@ -4,6 +4,14 @@
 #   idle     swayidle timeout: outputs off, stop kanshi
 #   resume   swayidle resume:  restart kanshi (it re-enables outputs), outputs on
 #   changed  kanshi exec, after any output (re)appeared: refit windows
+#   autoscale  kanshi exec for the catch-all profile: scale each output by its
+#            resolution, then 'changed'
+#
+# autoscale goes by the shorter side of the current mode, so rotated and
+# ultrawide monitors are treated like their landscape 16:9 size: 1440 and up
+# (2K, 4K) gets 2, 1080 gets 1.2 (2 is too big there), anything smaller 1.
+# kanshi can't match by resolution, so the catch-all profile sets no scale and
+# this sets it; an output already at its scale is left alone.
 #
 # Some monitors drop HDMI hotplug every ~12s while they have no signal. labwc
 # re-adds each one as a new output; rc.xml has autoEnableOutputs=no so labwc
@@ -34,7 +42,30 @@ refit() {   # refit <delay>: restart waybar once nothing has asked again for <de
 		sleep 1.5
 		wtype -M logo -M alt -M shift -k F12 -m shift -m alt -m logo' refit "${1:-1}" "$R" "$me" < /dev/null > /dev/null 2>&1
 }
+autoscale() {
+	wlr-randr | awk '
+		function flush() {
+			if (name != "" && on) {
+				s = (short >= 1440) ? 2 : (short >= 1080) ? 1.2 : 1
+				if (s != scale) print name, s
+			}
+			name = ""; on = 0; short = 0; scale = 0
+		}
+		/^[^ ]/ { flush(); name = $1 }
+		/^  Enabled: yes/ { on = 1 }
+		/^    [0-9]+x[0-9]+ px.*current/ {
+			split($1, m, "x"); short = (m[1] < m[2]) ? m[1] : m[2]
+		}
+		/^  Scale:/ { scale = $2 + 0 }
+		END { flush() }' |
+	while read -r OUT S; do
+		wlr-randr --output "$OUT" --scale "$S"
+	done
+}
 case $1 in
+autoscale)
+	[ -e "$F" ] || autoscale
+	exec "$0" changed ;;
 lock)
 	pgrep -x swaylock > /dev/null || swaylock -f -c 000000
 	setsid -f "$0" unlocked < /dev/null > /dev/null 2>&1 ;;
@@ -53,5 +84,5 @@ resume)
 changed)
 	if [ -e "$F" ]; then wlopm --off '*'; else refit 2; fi ;;
 *)
-	echo "usage: $0 lock|idle|resume|changed" >&2; exit 1 ;;
+	echo "usage: $0 lock|idle|resume|changed|autoscale" >&2; exit 1 ;;
 esac
