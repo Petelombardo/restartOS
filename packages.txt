@@ -36,6 +36,11 @@ chrony haveged sysstat uuid
 # mDNS: publish restartos.local, resolve other .local hosts
 avahi-daemon avahi-utils libnss-mdns
 
+# Virtual machines: the guest agent (Proxmox/libvirt shutdown, IP reporting,
+# fsfreeze). Not enabled: its udev rule starts it only when the VM has the
+# org.qemu.guest_agent.0 channel, so it never runs on bare metal.
+qemu-guest-agent
+
 # Network diagnostics (nmap without its NSE scripts, see collect.py)
 bind9-dnsutils bind9-host nmap bmon tcpdump mtr-tiny
 

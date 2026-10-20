@@ -90,6 +90,9 @@ to always becomes `system.img`.
   together after an AP event. Refresh: `apt-get download firmware-mediatek`, `dpkg-deb -x`,
   copy `WIFI_MT7961_patch_mcu_1_2_hdr.bin`, `WIFI_RAM_CODE_MT7961_1.bin`,
   `BT_RAM_CODE_MT7961_1_2_hdr.bin`.
+* **qemu-guest-agent:** nothing to enable; its udev rule starts the service only
+  when the VM has the `org.qemu.guest_agent.0` virtio channel (Proxmox: Options →
+  QEMU Guest Agent), so on bare metal it never runs.
 * **Name resolution:** `hosts: files dns mdns4_minimal` — unicast DNS first (split DNS
   can use `.local` domains like corp.local), mDNS only as the fallback.
 * **Locale:** set in `overlay/etc/locale.conf`; `/etc/default/locale` must stay a symlink
