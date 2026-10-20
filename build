@@ -141,6 +141,7 @@ mkdir -p "$R/var/lib/dpkg/info" "$R/var/lib/dpkg/updates" "$R/var/lib/dpkg/alter
 touch "$R/var/lib/dpkg/status" "$R/var/lib/dpkg/available"
 
 echo "== Trigger handlers (addons activate these at boot via /scripts/startup/01-postinst-triggers)"
+mkdir -p "$R/scripts/postinst.d"
 for P in $(cat "$WORK/closure.txt"); do
 	I=/var/lib/dpkg/info/$P
 	[ -f $I.triggers ] || I=/var/lib/dpkg/info/$P:$(dpkg --print-architecture)
