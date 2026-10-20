@@ -31,6 +31,7 @@ rebuild — don't hand-edit the output folders, they are wiped on every build.
 | `update-initrd` | legacy: refreshes the userspace of an existing initrd from the host (superseded by `initrd/`) |
 | `image/make` | arm64 board image builder, run from a board dir (`/builds/restartOS/make` links here) |
 | `image/qemu` | boots a finished board image (`/builds/restartOS/qemu` links here) |
+| `image/make-iso` | amd64 hybrid BIOS/UEFI ISO builder, run from an ISO dir (`/builds/restartOS/make-iso` links here; see the README) |
 
 ## Workflow
 
@@ -129,16 +130,20 @@ Current addons:
   glyphs, so the file itself has to lose them; needs python3-fonttools on the host). Config = the build host
   user's labwc + waybar config at the time; the portal restart in autostart is backgrounded.
   Monitor hotplug (unplug, power-cycle, deep sleep) destroys the wlroots output and
-  brings it back as a new one at scale 1, so scaling comes from kanshi
-  (`~/.config/kanshi/config`, reapplied on every output change), not a one-shot
-  wlr-randr. Waybar tears down its bar on output loss and kills processes its
+  brings it back as a new one at scale 1, so scaling is reapplied on every output
+  change by kanshi (`~/.config/kanshi/config`), not a one-shot wlr-randr. kanshi
+  can't match by resolution, so its catch-all profile sets no scale and runs
+  `restartos-display autoscale`, which scales each output by the shorter side of
+  its current mode: 1440 and up (2K, 4K, 1440p ultrawides) gets 2, 1080 gets 1.2,
+  smaller gets 1. A per-monitor profile with its own `scale` overrides it (exec
+  `restartos-display changed` there instead). Waybar tears down its bar on output loss and kills processes its
   on-click handlers started, so every app launcher in the waybar config goes
   through `setsid -f`. After a reconnect labwc 0.8.3 leaves windows sized to the
   full screen, covering waybar (layer bottom); a waybar reload (SIGUSR2) makes
   labwc re-fit them. Screen blanking: some monitors (the KTC H24T7) drop HDMI
   hotplug every ~12s while they have no signal, and labwc would re-add each as a
   powered-on output, so the screen came back on overnight. So rc.xml sets
-  `autoEnableOutputs=no`, kanshi (`output * enable scale 2`) is the only thing
+  `autoEnableOutputs=no`, kanshi (`output * enable`) is the only thing
   that enables outputs, and `/usr/bin/restartos-display` (swayidle timeout/resume
   + kanshi exec) stops kanshi while idle and reloads waybar on resume/reconnect,
   and again after swaylock exits (swayidle locks via `restartos-display lock`): a

@@ -11,8 +11,7 @@ restartOS 15 is based on **Debian 13 (trixie)**. This repo holds every recipe an
 script needed to build it:
 
 - the **arm64 edition** for single-board computers (built on Armbian trixie)
-- the **amd64 edition**, for which the recipes are portable but the image
-  builder is not yet included (see [x86](#x86--amd64))
+- the **amd64 edition**, a hybrid BIOS/UEFI ISO (see [x86](#x86--amd64))
 
 ## How it is built
 
@@ -36,6 +35,7 @@ That tree is compressed into a squashfs `.img`. So:
 | `system-modules-<kver>.img` | the kernel's modules (per board/kernel) | see [Kernel modules](#kernel-modules) |
 | initrd | `initrd/` | `initrd/build-initrd <kver>` |
 | bootable board image (arm64) | a board dir with `config` | `image/make` |
+| bootable ISO (amd64) | an ISO dir with `config` | `image/make-iso` |
 
 Current addons: `labwc` (desktop: labwc, greetd, waybar, pipewire), `chromium`,
 `ai` (Claude Code + pi, copied from the build user's installs, no credentials),
@@ -58,6 +58,7 @@ scripts/create-package  the engine behind build-addon
 scripts/restartos-env   loads local.conf for the scripts
 initrd/              initrd recipe (initramfs-tools hook + restartOS boot scripts)
 image/make           arm64 board image builder (run from a board dir)
+image/make-iso       amd64 hybrid ISO builder (run from an ISO dir)
 image/qemu           boots a finished board image under KVM
 test-qemu            boots system.img + addons with a board's kernel, without make
 update-initrd        legacy: refreshes an existing initrd's userspace
@@ -75,6 +76,8 @@ dirs live there, and the scripts refer to it by that path.
    sudo apt install git python3 rsync pv squashfs-tools openssl debootstrap \
         parted kpartx dosfstools e2fsprogs qemu-system
    sudo apt install u-boot-tools        # arm64 boards (mkimage for uInitrd)
+   sudo apt install xorriso isolinux syslinux-common grub-efi-amd64-bin \
+        mtools ovmf                     # amd64 ISO (ovmf: UEFI test in qemu)
    ```
 3. **Workspace and repo:**
    ```
@@ -86,6 +89,7 @@ dirs live there, and the scripts refer to it by that path.
    ln -s $PWD/scripts/create-package /builds/scripts/create-package
    ln -s $PWD/image/make             /builds/restartOS/make
    ln -s $PWD/image/qemu             /builds/restartOS/qemu
+   ln -s $PWD/image/make-iso         /builds/restartOS/make-iso   # amd64
    echo 15a.0 > /builds/restartOS/version     # bumped by every compress
    touch /builds/restartOS/changelog          # compress appends its comment
    cp local.conf.example local.conf           # then edit
@@ -124,6 +128,8 @@ sudo ./initrd/build-initrd <kver> /builds/restartOS/<board>/<kver>/initrd.img
 
 # 4. bootable image (arm64 board)
 cd /builds/restartOS/<board>/<kver> && sudo ./make
+#    or the ISO (amd64)
+cd /builds/restartOS/x86/<kver> && sudo ./make-iso
 ```
 
 `compress` bumps the minor version in `/builds/restartOS/version`, appends your
@@ -198,22 +204,56 @@ The image recipes don't depend on the architecture: `resolve.py`, `collect.py`,
 per-architecture parts are split out:
 
 - `packages-amd64.txt`: Debian firmware and microcode instead of
-  `armbian-firmware`. **Untested starting point.** Firmware needs
-  `non-free-firmware` in the host's apt sources.
+  `armbian-firmware`. Firmware needs `non-free-firmware` in the host's apt
+  sources.
 - `overlay-arm64/` (Armbian MOTD and release file, MT7961 firmware) isn't
   applied on amd64, so x86 gets only the restartOS MOTD. Put x86-only files in
   `overlay-amd64/`.
 - `build` knows each architecture's dynamic loader (arm64 and amd64).
 - `initrd/build-initrd` works the same on amd64.
 
-Not here yet:
+The kernel is the build host's Debian kernel. Build the modules image and the
+initrd for it as above, then the ISO from an ISO dir:
 
-- **The x86 image builder.** The amd64 edition builds a bootable hybrid ISO
-  (isolinux + EFI grub, also bootable from USB, `root=CDROM`) with its own
-  `make` in the x86 host's `/builds/restartOS`. Add it as `image/make-iso`,
-  along with its boot assets or a recipe for them.
-- `test-qemu` and `image/qemu` are arm64-only (qemu-system-aarch64 with a board
-  kernel).
+```
+K=$(uname -r)                          # e.g. 6.12.86+deb13-amd64
+mkdir -p /builds/restartOS/x86/$K && cd /builds/restartOS/x86/$K
+sudo /builds/minimal-system/initrd/build-initrd $K initrd.img
+ln -s /builds/restartOS/make-iso make-iso
+printf '%s\n' 'CUSTOMNAME="x86"' "MODULES=\"$K\"" \
+	'PACKAGES="system.img static-addons-labwc.img static-addons-chromium.img"' \
+	'TESTBUILD=1' > config
+sudo ./make-iso                        # -> /builds/restartOS-x86[-test].iso
+```
+
+| `config` | |
+|---|---|
+| `CUSTOMNAME` | output name: `/builds/restartOS-<CUSTOMNAME>.iso` |
+| `MODULES` | kernel version: `system-modules-<this>.img` (ISO dir or `/builds/packages`) |
+| `PACKAGES` | images from `/builds/packages` |
+| `TESTBUILD` | 1 appends `-test` to the name |
+| `KERNEL` | optional, default `/boot/vmlinuz-$MODULES` |
+| `INITRD` | optional, default `./initrd.img` |
+| `APPEND` | optional, extra kernel command line |
+
+`make-iso` builds a hybrid ISO that boots legacy BIOS (isolinux) and UEFI (a
+standalone grub `bootx64.efi`, unsigned: turn Secure Boot off), from optical
+media or `dd`'d to a USB stick. The boot loaders come from the host's Debian
+packages, so the repo holds no boot binaries. The volume label is `restartos`,
+which is what the initrd searches for. The EFI grub finds the ISO by a marker
+file unique to each build, so another restartOS stick plugged in doesn't
+confuse it. The images are grafted into the ISO from `/builds/packages`, so
+`/builds` only needs room for the ISO itself.
+
+Test in qemu (`test-qemu` and `image/qemu` are arm64-only):
+
+```
+qemu-system-x86_64 -m 2560 -cdrom /builds/restartOS-x86-test.iso -vga std     # BIOS
+cp /usr/share/OVMF/OVMF_VARS_4M.fd /tmp/vars.fd                               # UEFI:
+qemu-system-x86_64 -m 2560 -cdrom /builds/restartOS-x86-test.iso -vga std \
+	-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+	-drive if=pflash,format=raw,file=/tmp/vars.fd
+```
 
 ## Credentials
 

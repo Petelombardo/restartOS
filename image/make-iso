@@ -1,0 +1,116 @@
+#!/bin/bash
+# Build the x86 (amd64) hybrid ISO: legacy BIOS boot via isolinux, UEFI boot via
+# a standalone grub bootx64.efi, from optical media or dd'd to a USB stick.
+# Run from an ISO dir (e.g. /builds/restartOS/x86/<kver>/) holding:
+#   initrd.img   from initrd/build-initrd <kver>
+#   config       CUSTOMNAME, MODULES (kernel version), PACKAGES, TESTBUILD, and
+#                optionally KERNEL (default /boot/vmlinuz-$MODULES), INITRD
+#                (default ./initrd.img), APPEND (extra kernel command line)
+# Output: /builds/restartOS-$CUSTOMNAME.iso
+# Boot assets come from the host's Debian packages, nothing binary is kept here:
+#   apt install xorriso isolinux syslinux-common grub-efi-amd64-bin mtools dosfstools
+. "$(dirname "$(readlink -f "$0")")/../scripts/restartos-env"
+set -e
+TESTBUILD=0
+APPEND=""
+INITRD=./initrd.img
+
+[ -f ./config ] || { echo "No ./config: run make-iso from an ISO dir (see the top of $0)"; exit 1; }
+source ./config
+
+KERNEL=${KERNEL:-/boot/vmlinuz-$MODULES}
+[ $TESTBUILD -eq 1 ] && CUSTOMNAME="${CUSTOMNAME}-test"
+ISO=/builds/restartOS-$CUSTOMNAME.iso
+
+ISOLINUX=/usr/lib/ISOLINUX
+SYSLINUX=/usr/lib/syslinux/modules/bios
+for f in $ISOLINUX/isolinux.bin $ISOLINUX/isohdpfx.bin $SYSLINUX/ldlinux.c32 \
+	/usr/lib/grub/x86_64-efi/linux.mod "$KERNEL" "$INITRD"; do
+	[ -f "$f" ] || { echo "Missing $f"; exit 1; }
+done
+for t in xorriso grub-mkstandalone mkfs.vfat mmd mcopy; do
+	command -v $t > /dev/null || { echo "Missing $t (see the apt install line at the top of $0)"; exit 1; }
+done
+
+if [ -f ./system-modules-$MODULES.img ]; then
+	MODULESIMG=./system-modules-$MODULES.img
+else
+	MODULESIMG=/builds/packages/system-modules-$MODULES.img
+fi
+for PACKAGE in $PACKAGES; do
+	[ -f /builds/packages/$PACKAGE ] || { echo "Missing /builds/packages/$PACKAGE"; exit 1; }
+done
+[ -f $MODULESIMG ] || { echo "Missing $MODULESIMG"; exit 1; }
+
+WORK=$(mktemp -d /builds/make-iso.XXXXXX)
+trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK/isolinux" "$WORK/boot/grub" "$WORK/EFI/boot" "$WORK/.disk"
+
+# The initrd finds the media by its "restartos" label (find-linux), so that is
+# the ISO's volume id, whether booted as a CD or from a dd'd USB stick.
+# CMDLINE matches both loaders; root=USB selects the label search.
+CMDLINE="root=USB rootdelay=10 rw $APPEND"
+
+cp $ISOLINUX/isolinux.bin $SYSLINUX/ldlinux.c32 "$WORK/isolinux/"
+cat > "$WORK/isolinux/isolinux.cfg" <<EOF
+timeout 10
+prompt 1
+default restartos
+
+label restartos
+    kernel /isolinux/vmlinuz64
+    append initrd=/isolinux/initrd.img $CMDLINE
+EOF
+
+cat > "$WORK/boot/grub/grub.cfg" <<EOF
+set timeout=3
+set default=0
+
+menuentry 'restartOS' {
+	linux /isolinux/vmlinuz64 $CMDLINE
+	initrd /isolinux/initrd.img
+}
+EOF
+
+# The EFI binary's built-in config finds this ISO by a file unique to this build
+# (not by label: another restartOS stick may be plugged in) and loads the real
+# grub.cfg from it.
+STAMP=restartos-$(date +%Y%m%d%H%M%S)
+touch "$WORK/.disk/$STAMP"
+cat > "$WORK/embedded.cfg" <<EOF
+search --no-floppy --set=root --file /.disk/$STAMP
+set prefix=(\$root)/boot/grub
+configfile (\$root)/boot/grub/grub.cfg
+EOF
+grub-mkstandalone -O x86_64-efi -o "$WORK/EFI/boot/bootx64.efi" \
+	--modules="part_gpt part_msdos iso9660 fat search search_fs_file linux normal configfile all_video" \
+	--locales="" --fonts="" --themes="" \
+	"boot/grub/grub.cfg=$WORK/embedded.cfg"
+rm "$WORK/embedded.cfg"
+
+# El Torito EFI boot image: a small FAT holding EFI/boot/bootx64.efi
+EFIKB=$(( $(stat -c %s "$WORK/EFI/boot/bootx64.efi") / 1024 + 1024 ))
+mkfs.vfat -C -n RESTARTEFI "$WORK/boot/efiboot.img" $EFIKB > /dev/null
+mmd -i "$WORK/boot/efiboot.img" ::/EFI ::/EFI/boot
+mcopy -i "$WORK/boot/efiboot.img" "$WORK/EFI/boot/bootx64.efi" ::/EFI/boot/
+
+# The kernel, initrd and images are grafted in from where they are rather than
+# copied into $WORK, so /builds needs room for the ISO only.
+GRAFTS=("isolinux/vmlinuz64=$KERNEL" "isolinux/initrd.img=$INITRD"
+	"$(basename $MODULESIMG)=$MODULESIMG"
+	"version=/builds/restartOS/version" "changelog=/builds/restartOS/changelog")
+for PACKAGE in $PACKAGES; do
+	GRAFTS+=("$PACKAGE=/builds/packages/$PACKAGE")
+done
+
+rm -f "$ISO"
+xorriso -as mkisofs -iso-level 3 -R -volid restartos \
+	-isohybrid-mbr $ISOLINUX/isohdpfx.bin \
+	-b isolinux/isolinux.bin -c isolinux/boot.cat -no-emul-boot -boot-load-size 4 -boot-info-table \
+	-eltorito-alt-boot -e boot/efiboot.img -no-emul-boot -isohybrid-gpt-basdat \
+	-o "$ISO" -graft-points "$WORK" "${GRAFTS[@]}"
+ls -la "$ISO"
+
+upload "$ISO"
+
+echo "Done building ISO"
