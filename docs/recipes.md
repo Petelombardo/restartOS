@@ -179,6 +179,7 @@ Current addons:
 * **ai** — git from debs; `post-build` copies Claude Code (native binary, auto-update
   off via `/etc/claude-code/managed-settings.json`) to `/opt/claude` and pi (+ its own
   node) to `/opt/pi` from the host user's installs. No user config is shipped.
+  pi is optional: if the host user has no pi install, the addon ships Claude Code only.
   `/usr/local/bin/pi` is a wrapper that sets `PI_CODING_AGENT_SESSION_DIR=.pi/sessions`
   (unless a session dir is already set by env or settings), so sessions live in the
   folder pi is started from and survive reboots when that folder is persistent.
