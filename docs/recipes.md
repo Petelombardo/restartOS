@@ -101,6 +101,12 @@ to always becomes `system.img`.
   directories on a real disk mount: the overlay root isn't mounted with
   `nfs_export=on`, so the kernel refuses to export it. Keep exports across reboots
   with `make-persistent add /etc/exports`, then `sudo exportfs -ra`.
+* **LVM and software RAID:** `lvm2` volume groups and `mdadm` arrays activate by
+  themselves through their udev rules when the disks appear. mdadm's postinst output
+  is shipped in `overlay/`: `etc/mdadm/mdadm.conf` (no ARRAY lines; `HOMEHOST <ignore>`
+  so arrays keep their names whatever the per-machine hostname is) and
+  `etc/default/mdadm`. The monthly scrub and the mdmonitor mail timers aren't enabled
+  (no MTA, and a live system rarely runs for a month).
 * **cloud-guest-utils:** `growpart` grows a partition after its virtual disk is
   enlarged, and `ec2metadata` reads EC2 instance metadata. No maintainer scripts. GPT
   is resized with `sfdisk` (from `fdisk`), so gdisk, a Recommends, is left out.

@@ -23,6 +23,8 @@ vlan net-tools iputils-arping
 # Storage
 e2fsprogs dosfstools ntfs-3g fdisk parted dmsetup lvm2 cryptsetup-bin sshfs kpartx
 squashfs-tools
+# software RAID; arrays assemble at boot through its udev rules (etc/mdadm/mdadm.conf)
+mdadm
 # mkfs/fsck for the other common filesystems (kernel drivers are in the board kernel)
 exfatprogs btrfs-progs xfsprogs f2fs-tools
 # data recovery: ddrescue; disk health: smartctl (smartd not enabled)

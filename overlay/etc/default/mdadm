@@ -1,0 +1,7 @@
+# Written by mdadm's postinst on Debian; read by its checkarray/mkconf helpers.
+# The scrub and monitor timers (mdcheck_*, mdmonitor-oneshot) aren't enabled.
+AUTOCHECK=true
+AUTOSCAN=true
+START_DAEMON=true
+DAEMON_OPTIONS="--syslog"
+VERBOSE=false
