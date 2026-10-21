@@ -1,2 +1,4 @@
 # restartOS 15 chromium addon (sits on system.img + static-addons-labwc.img)
 chromium
+# Japanese/Korean/Chinese glyphs (post-build drops the serif faces: ~51 MB, pages get sans)
+fonts-noto-cjk

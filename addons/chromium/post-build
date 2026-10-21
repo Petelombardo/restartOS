@@ -1,0 +1,4 @@
+#!/bin/bash
+# Noto CJK: keep Sans (Regular+Bold, ~38 MB), drop Serif (~51 MB).
+# Serif CJK requests fall back to Noto Sans CJK (the only CJK font left).
+rm -fv $DEST/usr/share/fonts/opentype/noto/NotoSerifCJK-*.ttc

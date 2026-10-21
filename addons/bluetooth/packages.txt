@@ -1,0 +1,7 @@
+# restartOS 15 bluetooth addon (bases system + labwc, which has pipewire/wireplumber).
+# Wireless earbuds/headsets as speaker + mic: pair once with bluetoothctl
+# (power on, scan on, pair/trust/connect <MAC>), then persist /var/lib/bluetooth.
+#   bluez                - bluetoothd + bluetoothctl (host: Debian's 5.82-1.1, not Armbian's +rpt)
+#   libspa-0.2-bluetooth - PipeWire BT plugin: A2DP (SBC/AAC/aptX/LDAC) and HFP mic (mSBC, LC3-SWB);
+#                          must match the base's libspa-0.2-modules version
+bluez libspa-0.2-bluetooth

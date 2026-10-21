@@ -60,6 +60,13 @@
       </action>
     </keybind>
 
+    <!-- clipboard history: pick an entry, it becomes the clipboard -->
+    <keybind key="W-v">
+      <action name="Execute">
+        <command>sh -c 'cliphist list | wofi --dmenu | cliphist decode | wl-copy'</command>
+      </action>
+    </keybind>
+
     <!-- Use a different terminal emulator -->
     <keybind key="W-Return">
       <action name="Execute" command="lxterminal" />

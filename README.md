@@ -39,7 +39,7 @@ That tree is compressed into a squashfs `.img`. So:
 
 Current addons: `labwc` (desktop: labwc, greetd, waybar, pipewire), `chromium`,
 `ai` (Claude Code + pi, copied from the build user's installs, no credentials),
-`awscli`, `podman`, `gparted`.
+`awscli`, `podman`, `gparted`, `bluetooth` (bluez + PipeWire BT, on labwc), `mpv` (on labwc).
 
 ## Repo layout
 
@@ -113,8 +113,8 @@ ln -sfn static-addons-system-trixie /builds/system
 cd /builds/system && sudo ./compress "what changed" && cd -
 
 # 2. addons -> /builds/packages/static-addons-<name>.img
-#    (labwc before chromium: chromium's bases are system + labwc)
-for a in labwc chromium ai awscli podman gparted; do
+#    (labwc before chromium, bluetooth and mpv: their bases are system + labwc)
+for a in labwc chromium bluetooth mpv ai awscli podman gparted; do
 	sudo ./build-addon $a
 	(cd /builds/static-addons-$a && sudo ./compress "what changed")
 done

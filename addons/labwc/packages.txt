@@ -10,6 +10,16 @@ xdg-desktop-portal xdg-desktop-portal-gtk xdg-desktop-portal-wlr
 
 # Used by ~/.config/labwc/rc.xml keybinds
 pulseaudio-utils grim slurp swappy lxterminal
+# Clipboard history (Super+V; the wl-paste watcher is in autostart)
+cliphist
+# Night light (autostart), monitor layout GUI (find positions/scales for kanshi)
+wlsunset wdisplays
+# Thunar's removable-drive handling
+thunar-volman
+# Image viewer (Thunar opens images with it; GTK/xfce libs already here, ~1.2 MB)
+ristretto
+# Thumbnail D-Bus service ristretto/thunar ask for (only a Recommends, so not pulled in)
+tumbler
 
 # Used by ~/.config/waybar/config buttons
 wofi thunar pulsemixer

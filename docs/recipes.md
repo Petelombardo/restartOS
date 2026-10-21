@@ -73,7 +73,7 @@ to always becomes `system.img`.
   * a service that should run → add it to the `systemctl --root enable` line in `build`
     (ssh is the exception: `/scripts/startup/ssh` generates host keys and starts it)
   * edits a config file (e.g. nsswitch for libnss-mdns) → ship the result in `overlay/`
-  * generates a config from /usr/share (sshd_config, chrony) → copy it in `build`
+  * generates a config from /usr/share (sshd_config, chrony, smartmontools' drivedb.h) → copy it in `build`
 * **Accounts:** restartos password defaults to `restartos` (`sudo PASSWORD=x ./build`
   bakes another); root is locked (restartos has NOPASSWD sudo); SSH password login is
   on — headless boxes are found via avahi and ssh'd into.
@@ -158,7 +158,13 @@ Current addons:
   a small client in `src/restartos-workspaces.c` that `post-build` compiles into
   `/usr/bin` (needs libwayland-dev + wayland-protocols on the host). Changing the
   number of desktops: edit rc.xml and the waybar group/buttons/style together.
+  Extras: clipboard history (`wl-paste --watch cliphist store` in autostart, Super+V
+  picks an entry through wofi), wlsunset night light 19:30-07:00 (autostart; needs the
+  display driver's gamma control), wdisplays (monitor layout GUI; kanshi still applies
+  its own config on the next output change, so copy what works into it), thunar-volman,
+  ristretto (image viewer) + tumbler (thumbnail D-Bus service for ristretto/thunar).
 * **chromium** — bases system + labwc; chromium plus the v14 `launch-chromium` wrapper. The wrapper passes `--disable-accelerated-video-decode`: on RK3588 the V4L2 hardware decoder crashed the GPU process when Zoom screen shares arrived, and Chromium then dropped GPU acceleration entirely. Even with that, Zoom screen shares from some presenters still crashed it inside Mesa 25.0 Panfrost (`glTexImage2D` → `panfrost_ptr_unmap` → `util_copy_rect` writing past the buffer), so `overlay/etc/chromium.d/panfrost` exports `PAN_MESA_DEBUG=linear` (Debian's `/usr/bin/chromium` sources `/etc/chromium.d/*`); drop it once the base moves to a newer Mesa.
+  `fonts-noto-cjk` gives Japanese/Korean/Chinese glyphs; `post-build` removes the Serif CJK faces (~51 MB), so CJK serif text falls back to Noto Sans CJK (~38 MB kept).
 * **ai** — git from debs; `post-build` copies Claude Code (native binary, auto-update
   off via `/etc/claude-code/managed-settings.json`) to `/opt/claude` and pi (+ its own
   node) to `/opt/pi` from the host user's installs. No user config is shipped.
@@ -195,6 +201,17 @@ Current addons:
   `post-build` points the menu entry at it. A hidden `gpartedbin.desktop` gives the window
   its taskbar/titlebar icon (GTK's app_id is the binary name). The polkit rule still
   lets the stock pkexec path run without a password.
+* **bluetooth** — bases system + labwc (pipewire/wireplumber); `bluez` (bluetoothd +
+  bluetoothctl) and `libspa-0.2-bluetooth` (PipeWire's A2DP/HFP plugin, version must
+  match the base's `libspa-0.2-modules`). Install Debian's bluez on the host
+  (`bluez=5.82-1.1`), not Armbian's `+rpt` build. The overlay enables
+  `bluetooth.service` (bluetooth.target.wants + dbus-org.bluez alias) in case the
+  replayed postinst doesn't. Pair with bluetoothctl (`power on`, `scan on`, `pair`/`trust`/`connect <MAC>`),
+  then `make-persistent add /var/lib/bluetooth` so pairings survive reboots.
+  WirePlumber switches earbuds to HFP (mono voice mic) when an app opens the mic and back
+  to A2DP afterwards; for better listening on calls, use another mic and keep the earbuds on A2DP.
+* **mpv** — bases system + labwc; just `mpv`, kept out of labwc because its ffmpeg
+  stack adds ~140 MB (uncompressed) of new dependencies.
 * **glusterfs** — GlusterFS built from source, not from debs: configure + make in
   `/builds/source/glusterfs/glusterfs-<ver>` first (`GLUSTER_SRC=` picks another tree).
   `packages.txt` only lists its runtime libraries; `post-build` runs `make install-strip`

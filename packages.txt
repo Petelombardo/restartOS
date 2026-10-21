@@ -17,14 +17,16 @@ perl-base dpkg adduser ucf debconf init-system-helpers
 network-manager wpasupplicant systemd-resolved iproute2 iputils-ping
 openssh-server openssh-client ca-certificates curl wget
 wireguard-tools iptables rfkill netcat-traditional netcat-openbsd
+# VLANs (vconfig; 8021q module ships in system-modules), ifconfig/route, arping
+vlan net-tools iputils-arping
 
 # Storage
 e2fsprogs dosfstools ntfs-3g fdisk parted dmsetup lvm2 cryptsetup-bin sshfs kpartx
 squashfs-tools
 # mkfs/fsck for the other common filesystems (kernel drivers are in the board kernel)
 exfatprogs btrfs-progs xfsprogs f2fs-tools
-# data recovery: ddrescue
-gddrescue
+# data recovery: ddrescue; disk health: smartctl (smartd not enabled)
+gddrescue smartmontools
 
 # Tools
 rsync pv lz4 zstd xz-utils bzip2 unzip file psmisc lsof pciutils usbutils
