@@ -221,7 +221,7 @@ mkdir -p /builds/restartOS/x86/$K && cd /builds/restartOS/x86/$K
 sudo /builds/minimal-system/initrd/build-initrd $K initrd.img
 ln -s /builds/restartOS/make-iso make-iso
 printf '%s\n' 'CUSTOMNAME="x86"' "MODULES=\"$K\"" \
-	'PACKAGES="system.img static-addons-labwc.img static-addons-chromium.img"' \
+	'PACKAGES="system.img static-addons-labwc.img static-addons-chromium.img static-addons-gparted.img"' \
 	'TESTBUILD=1' > config
 sudo ./make-iso                        # -> /builds/restartOS-x86[-test].iso
 ```
