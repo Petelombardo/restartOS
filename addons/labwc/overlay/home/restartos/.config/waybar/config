@@ -12,6 +12,8 @@
         "custom/terminal",
         "custom/FileManager",
         "custom/chromium",
+        "custom/clone-source",
+        "custom/clone-target",
         "wlr/taskbar"
     ],
     "modules-center": [],
@@ -201,13 +203,13 @@
         "format": " ",
         "on-click": "setsid -f /usr/bin/launch-clone-source",
         "tooltip": "true",
-        "tooltip-format": "Clone-source"
+        "tooltip-format": "Clone source: send a disk"
     },
     "custom/clone-target": {
         "format": " ",
         "on-click": "setsid -f /usr/bin/launch-clone-target",
         "tooltip": "true",
-        "tooltip-format": "Clone-target"
+        "tooltip-format": "Clone target: overwrite a disk"
     },
     "custom/terminal": {
         "format": " ",

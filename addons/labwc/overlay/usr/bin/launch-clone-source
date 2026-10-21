@@ -1,0 +1,10 @@
+#!/bin/sh
+# waybar's clone-source button: runs /usr/bin/clone-source (-> /scripts) as root
+# in a terminal. It reads whole disks, stops swap and sets vm.swappiness, so it
+# needs root; restartos has NOPASSWD sudo. The terminal stays open afterwards so
+# the result can be read.
+[ -t 0 ] || exec lxterminal --title="Clone source" -e "$0"
+sudo -n /usr/bin/clone-source
+rc=$?
+printf '\nclone-source exited with status %s. Press Enter to close.' "$rc"
+read _

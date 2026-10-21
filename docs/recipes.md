@@ -174,6 +174,11 @@ Current addons:
   display driver's gamma control), wdisplays (monitor layout GUI; kanshi still applies
   its own config on the next output change, so copy what works into it), thunar-volman,
   ristretto (image viewer) + tumbler (thumbnail D-Bus service for ristretto/thunar).
+  Clone buttons: waybar's `custom/clone-source` and `custom/clone-target` run
+  `/usr/bin/launch-clone-source|target`, which open lxterminal and run the base's
+  `/usr/bin/clone-*` (links to `/scripts`, made by `build`, as are the
+  `/usr/share/pixmaps/clone-*.png` icons) through `sudo -n`: both need root (raw
+  disk reads/writes, swapoff, swappiness, udev).
 * **chromium** — bases system + labwc; chromium plus the v14 `launch-chromium` wrapper. The wrapper passes `--disable-accelerated-video-decode`: on RK3588 the V4L2 hardware decoder crashed the GPU process when Zoom screen shares arrived, and Chromium then dropped GPU acceleration entirely. Even with that, Zoom screen shares from some presenters still crashed it inside Mesa 25.0 Panfrost (`glTexImage2D` → `panfrost_ptr_unmap` → `util_copy_rect` writing past the buffer), so `overlay/etc/chromium.d/panfrost` exports `PAN_MESA_DEBUG=linear` (Debian's `/usr/bin/chromium` sources `/etc/chromium.d/*`); drop it once the base moves to a newer Mesa.
   `fonts-noto-cjk` gives Japanese/Korean/Chinese glyphs; `post-build` removes the Serif CJK faces (~51 MB), so CJK serif text falls back to Noto Sans CJK (~38 MB kept).
 * **ai** — git from debs; `post-build` copies Claude Code (native binary, auto-update

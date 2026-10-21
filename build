@@ -59,8 +59,13 @@ if [ -d "$HERE/overlay-$ARCH" ]; then
 	(cd "$HERE/overlay-$ARCH" && find . -mindepth 1) | while read -r p; do chown -h root:root "$R/$p"; done
 fi
 chmod 0440 "$R/etc/sudoers" "$R/etc/sudoers.d/"*
-for s in changeuser make-persistent package upgrade; do
+for s in changeuser make-persistent package upgrade clone-source clone-target; do
 	ln -sfn "/scripts/$s" "$R/usr/bin/$s"
+done
+# icons for the labwc addon's waybar clone buttons
+mkdir -p "$R/usr/share/pixmaps"
+for s in clone-source clone-target; do
+	ln -sfn "/scripts/$s.png" "$R/usr/share/pixmaps/$s.png"
 done
 
 echo "== Creating base directories"

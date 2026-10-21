@@ -1,0 +1,10 @@
+#!/bin/sh
+# waybar's clone-target button: runs /usr/bin/clone-target (-> /scripts) as root
+# in a terminal. It overwrites a disk or partition, stops swap and pauses udev,
+# so it needs root; restartos has NOPASSWD sudo. The terminal stays open
+# afterwards so the result can be read.
+[ -t 0 ] || exec lxterminal --title="Clone target" -e "$0"
+sudo -n /usr/bin/clone-target
+rc=$?
+printf '\nclone-target exited with status %s. Press Enter to close.' "$rc"
+read _
