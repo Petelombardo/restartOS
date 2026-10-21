@@ -93,6 +93,14 @@ to always becomes `system.img`.
 * **qemu-guest-agent:** nothing to enable; its udev rule starts the service only
   when the VM has the `org.qemu.guest_agent.0` virtio channel (Proxmox: Options →
   QEMU Guest Agent), so on bare metal it never runs.
+* **NFS server:** `nfs-kernel-server` (pulls in nfs-common and rpcbind, so NFS mounts
+  work too). `build` replays its postinsts: the `statd` and `_rpc` accounts, the ucf
+  configs (`/etc/exports`, `/etc/nfs.conf`, `/etc/idmapd.conf`, both `/etc/default`
+  files) and the `/var/lib/nfs` state files, and enables `nfs-server.service`, as
+  Debian does. With the stock empty `/etc/exports` it serves nothing. Export
+  directories on a real disk mount: the overlay root isn't mounted with
+  `nfs_export=on`, so the kernel refuses to export it. Keep exports across reboots
+  with `make-persistent add /etc/exports`, then `sudo exportfs -ra`.
 * **cloud-guest-utils:** `growpart` grows a partition after its virtual disk is
   enlarged, and `ec2metadata` reads EC2 instance metadata. No maintainer scripts. GPT
   is resized with `sfdisk` (from `fdisk`), so gdisk, a Recommends, is left out.

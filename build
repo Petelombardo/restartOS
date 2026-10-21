@@ -86,7 +86,7 @@ DAYS=$(( $(date +%s) / 86400 ))
 cp "$R/usr/share/base-passwd/passwd.master" "$R/etc/passwd"
 cp "$R/usr/share/base-passwd/group.master" "$R/etc/group"
 sed -i -e 's#^root:\(.*\):/bin/sh$#root:\1:/bin/bash#' "$R/etc/passwd"
-POSTINST_USERS="_chrony avahi tcpdump"                 # created by maintainer scripts, not sysusers.d
+POSTINST_USERS="_chrony avahi tcpdump statd _rpc"      # created by maintainer scripts, not sysusers.d
 POSTINST_GROUPS="_chrony netdev _ssh avahi tcpdump"
 SYSUSERS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1=="u" || $1=="u!" {print $2}')
 SYSGROUPS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1 ~ /^(u|u!|g)$/ {print $2}')
@@ -135,6 +135,14 @@ cp "$R/usr/share/openssh/sshd_config" "$R/etc/ssh/sshd_config"
 cp "$R/usr/share/chrony/chrony.conf" "$R/etc/chrony/chrony.conf"
 install -m 0640 -o root -g _chrony /dev/null "$R/etc/chrony/chrony.keys"
 install -D -m 0644 "$R/usr/share/smartmontools/drivedb.h" "$R/var/lib/smartmontools/drivedb/drivedb.h"   # smartctl reads it from here
+# NFS: nfs-common's and nfs-kernel-server's ucf configs, and the state files their postinsts create
+cp "$R/usr/share/nfs-common/conffiles/nfs.conf" "$R/etc/nfs.conf"
+cp "$R/usr/share/nfs-common/conffiles/idmapd.conf" "$R/etc/idmapd.conf"
+cp "$R/usr/share/nfs-common/conffiles/nfs-common.default" "$R/etc/default/nfs-common"
+cp "$R/usr/share/nfs-kernel-server/conffiles/etc.exports" "$R/etc/exports"
+cp "$R/usr/share/nfs-kernel-server/conffiles/nfs-kernel-server.default" "$R/etc/default/nfs-kernel-server"
+touch "$R/var/lib/nfs/etab" "$R/var/lib/nfs/rmtab" "$R/var/lib/nfs/state"
+chown statd: "$R/var/lib/nfs/sm" "$R/var/lib/nfs/sm.bak" "$R/var/lib/nfs/state"
 ln -sfn ../run/systemd/resolve/stub-resolv.conf "$R/etc/resolv.conf"
 ln -sfn "$(readlink /etc/localtime)" "$R/etc/localtime"
 [ -f /etc/timezone ] && cp /etc/timezone "$R/etc/timezone"
@@ -173,7 +181,7 @@ echo "== Enabling units"
 systemctl --root="$R" set-default multi-user.target
 systemctl --root="$R" enable getty@tty1.service restartos.service restartos-shutdown.service \
 	NetworkManager.service systemd-resolved.service chrony.service haveged.service \
-	avahi-daemon.service restartos-hostname.service
+	avahi-daemon.service restartos-hostname.service nfs-server.service
 
 echo "== Building ld.so.cache"
 chroot "$R" /sbin/ldconfig
