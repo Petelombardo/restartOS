@@ -93,6 +93,9 @@ to always becomes `system.img`.
 * **qemu-guest-agent:** nothing to enable; its udev rule starts the service only
   when the VM has the `org.qemu.guest_agent.0` virtio channel (Proxmox: Options →
   QEMU Guest Agent), so on bare metal it never runs.
+* **cloud-guest-utils:** `growpart` grows a partition after its virtual disk is
+  enlarged, and `ec2metadata` reads EC2 instance metadata. No maintainer scripts. GPT
+  is resized with `sfdisk` (from `fdisk`), so gdisk, a Recommends, is left out.
 * **Name resolution:** `hosts: files dns mdns4_minimal` — unicast DNS first (split DNS
   can use `.local` domains like corp.local), mDNS only as the fallback.
 * **Locale:** set in `overlay/etc/locale.conf`; `/etc/default/locale` must stay a symlink

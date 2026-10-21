@@ -39,7 +39,9 @@ avahi-daemon avahi-utils libnss-mdns
 # Virtual machines: the guest agent (Proxmox/libvirt shutdown, IP reporting,
 # fsfreeze). Not enabled: its udev rule starts it only when the VM has the
 # org.qemu.guest_agent.0 channel, so it never runs on bare metal.
-qemu-guest-agent
+# cloud-guest-utils: growpart (grow a partition into a resized virtual disk),
+# ec2metadata. GPT uses sfdisk from fdisk, so gdisk isn't needed.
+qemu-guest-agent cloud-guest-utils
 
 # Network diagnostics (nmap without its NSE scripts, see collect.py)
 bind9-dnsutils bind9-host nmap bmon tcpdump mtr-tiny
