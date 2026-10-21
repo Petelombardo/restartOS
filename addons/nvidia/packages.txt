@@ -1,0 +1,7 @@
+# restartOS 15 nvidia addon (amd64): NVIDIA GPU firmware for the kernel's nouveau
+# driver, kept out of the base for its size (~61 MB uncompressed, mostly GSP images).
+# RTX 30/40 (Ampere/Ada) need the GSP firmware or nouveau doesn't drive them at all;
+# Turing (RTX 20/GTX 16) and older use it for acceleration. Blackwell (RTX 50) isn't
+# supported by the 6.12 kernel's nouveau with or without it.
+# Needs non-free-firmware in the host's apt sources.
+firmware-nvidia-graphics

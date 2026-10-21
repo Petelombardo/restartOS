@@ -218,6 +218,13 @@ Current addons:
   `post-build` points the menu entry at it. A hidden `gpartedbin.desktop` gives the window
   its taskbar/titlebar icon (GTK's app_id is the binary name). The polkit rule still
   lets the stock pkexec path run without a password.
+* **nvidia** — amd64 only; `firmware-nvidia-graphics` (non-free-firmware), the firmware
+  the kernel's nouveau driver loads. RTX 30/40 (Ampere/Ada) need its GSP images or
+  nouveau doesn't drive them at all, so without this addon labwc has no display on
+  them; Turing and older use it for acceleration. It's an addon for its size (~61 MB
+  uncompressed). The initrd loads no GPU drivers, so nouveau probes after the images
+  are stacked and finds the firmware here. Blackwell (RTX 50) has no nouveau support
+  in the 6.12 kernel, so it gets no GUI either way.
 * **bluetooth** — bases system + labwc (pipewire/wireplumber); `bluez` (bluetoothd +
   bluetoothctl) and `libspa-0.2-bluetooth` (PipeWire's A2DP/HFP plugin, version must
   match the base's `libspa-0.2-modules`). Install Debian's bluez on the host
