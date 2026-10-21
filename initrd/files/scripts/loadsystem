@@ -125,7 +125,7 @@ do
 		pv < $i > ${rootmnt}/restartos/images/`basename $i`
 	fi
 done
-cp -v /drive/boot.tar.gz /drive/efi.tar.gz /drive/isolinux/vmlinuz64 /drive/isolinux/initrd64.xz /drive/version ${rootmnt}/restartos/images/
+cp -v /drive/boot.tar.gz /drive/efi.tar.gz /drive/isolinux/vmlinuz64 /drive/isolinux/initrd.img /drive/version ${rootmnt}/restartos/images/
 
 echo ""
 

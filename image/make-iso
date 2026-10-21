@@ -8,7 +8,9 @@
 #                (default ./initrd.img), APPEND (extra kernel command line)
 # Output: /builds/restartOS-$CUSTOMNAME.iso
 # Boot assets come from the host's Debian packages, nothing binary is kept here:
-#   apt install xorriso isolinux syslinux-common grub-efi-amd64-bin mtools dosfstools
+#   apt install xorriso isolinux syslinux-common grub-efi-amd64-bin grub-pc-bin mtools dosfstools
+# The ISO also carries boot.tar.gz and efi.tar.gz, a prebuilt grub kit that
+# scripts/install-usb writes to a USB stick, so the live system needs no grub.
 . "$(dirname "$(readlink -f "$0")")/../scripts/restartos-env"
 set -e
 TESTBUILD=0
@@ -25,10 +27,10 @@ ISO=/builds/restartOS-$CUSTOMNAME.iso
 ISOLINUX=/usr/lib/ISOLINUX
 SYSLINUX=/usr/lib/syslinux/modules/bios
 for f in $ISOLINUX/isolinux.bin $ISOLINUX/isohdpfx.bin $SYSLINUX/ldlinux.c32 \
-	/usr/lib/grub/x86_64-efi/linux.mod "$KERNEL" "$INITRD"; do
+	/usr/lib/grub/x86_64-efi/linux.mod /usr/lib/grub/i386-pc/boot.img "$KERNEL" "$INITRD"; do
 	[ -f "$f" ] || { echo "Missing $f"; exit 1; }
 done
-for t in xorriso grub-mkstandalone mkfs.vfat mmd mcopy; do
+for t in xorriso grub-mkstandalone grub-mkimage mkfs.vfat mmd mcopy; do
 	command -v $t > /dev/null || { echo "Missing $t (see the apt install line at the top of $0)"; exit 1; }
 done
 
@@ -44,7 +46,8 @@ done
 
 WORK=$(mktemp -d /builds/make-iso.XXXXXX)
 trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/isolinux" "$WORK/boot/grub" "$WORK/EFI/boot" "$WORK/.disk"
+mkdir -p "$WORK/isolinux" "$WORK/boot/grub" "$WORK/EFI/boot" "$WORK/.disk" \
+	"$WORK/usb/boot/grub/i386-pc" "$WORK/usb/EFI/boot"
 
 # The initrd finds the media by its "restartos" label (find-linux), so that is
 # the ISO's volume id, whether booted as a CD or from a dd'd USB stick.
@@ -93,6 +96,26 @@ EFIKB=$(( $(stat -c %s "$WORK/EFI/boot/bootx64.efi") / 1024 + 1024 ))
 mkfs.vfat -C -n RESTARTEFI "$WORK/boot/efiboot.img" $EFIKB > /dev/null
 mmd -i "$WORK/boot/efiboot.img" ::/EFI ::/EFI/boot
 mcopy -i "$WORK/boot/efiboot.img" "$WORK/EFI/boot/bootx64.efi" ::/EFI/boot/
+
+# USB kit for install-usb, which makes an MBR stick with a FAT32 data partition
+# (1, holds EFI/boot) and the ext4 "restartos" partition (2, holds boot/grub,
+# isolinux/ and the images). Both loaders read boot/grub/grub.cfg from partition 2.
+# "(,msdos2)" in the grub prefix is partition 2 of the disk grub was loaded from.
+# BIOS: boot.img goes in the MBR and core.img in the gap before partition 1.
+cp "$WORK/boot/grub/grub.cfg" "$WORK/usb/boot/grub/"
+cp /usr/lib/grub/i386-pc/boot.img "$WORK/usb/boot/grub/i386-pc/"
+# NOP the floppy-or-hard-disk check as grub-bios-setup does, so the drive
+# number the BIOS passes in is always used
+printf '\x90\x90' | dd of="$WORK/usb/boot/grub/i386-pc/boot.img" bs=1 seek=$((0x66)) conv=notrunc status=none
+grub-mkimage -O i386-pc -o "$WORK/usb/boot/grub/i386-pc/core.img" -p "(,msdos2)/boot/grub" \
+	biosdisk part_msdos ext2 linux normal configfile search test
+# UEFI: the firmware loads bootx64.efi from partition 1; the same "(,msdos2)"
+# prefix points grub at partition 2 of that disk.
+grub-mkimage -O x86_64-efi -o "$WORK/usb/EFI/boot/bootx64.efi" -p "(,msdos2)/boot/grub" \
+	part_msdos ext2 fat linux normal configfile search test all_video
+tar -czf "$WORK/boot.tar.gz" -C "$WORK/usb" --owner=0 --group=0 boot
+tar -czf "$WORK/efi.tar.gz" -C "$WORK/usb" --owner=0 --group=0 EFI
+rm -r "$WORK/usb"
 
 # The kernel, initrd and images are grafted in from where they are rather than
 # copied into $WORK, so /builds needs room for the ISO only.

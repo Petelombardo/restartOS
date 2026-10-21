@@ -77,7 +77,7 @@ dirs live there, and the scripts refer to it by that path.
         parted kpartx dosfstools e2fsprogs qemu-system
    sudo apt install u-boot-tools        # arm64 boards (mkimage for uInitrd)
    sudo apt install xorriso isolinux syslinux-common grub-efi-amd64-bin \
-        mtools ovmf                     # amd64 ISO (ovmf: UEFI test in qemu)
+        grub-pc-bin mtools ovmf         # amd64 ISO (ovmf: UEFI test in qemu)
    ```
 3. **Workspace and repo:**
    ```
@@ -244,6 +244,12 @@ which is what the initrd searches for. The EFI grub finds the ISO by a marker
 file unique to each build, so another restartOS stick plugged in doesn't
 confuse it. The images are grafted into the ISO from `/builds/packages`, so
 `/builds` only needs room for the ISO itself.
+
+The ISO also carries `boot.tar.gz` and `efi.tar.gz`, a prebuilt grub kit for
+`scripts/install-usb`, which writes it to a stick (BIOS: `boot.img` in the MBR
+and `core.img` before partition 1; UEFI: `EFI/boot/bootx64.efi` on the FAT
+partition), so the live system needs no grub. Both find `boot/grub/grub.cfg` on
+partition 2 of the disk they were loaded from.
 
 Test in qemu (`test-qemu` and `image/qemu` are arm64-only):
 

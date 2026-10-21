@@ -138,20 +138,24 @@ echo "** Copying the system files **"
 cp -av /mnt/boot/system*.img /mnt/d2/
 cp -av /mnt/boot/version /mnt/d2/
 echo "** Copying boot files **"
-cp /mnt/boot/boot.tar.gz /mnt/d2/
-tar -xf /mnt/boot/boot.tar.gz -C /mnt/d2/
-#mv /mnt/d2/boot/grub/grub.cfg.default /mnt/d2/boot/grub/grub.cfg
-mkdir /mnt/d2/isolinux
-cp -av /mnt/boot/vmlinuz64 /mnt/boot/initrd64.gz /mnt/d2/isolinux/
+# boot.tar.gz and efi.tar.gz are the prebuilt grub kit from image/make-iso;
+# they are kept on the stick too so it can make further sticks
+cp /mnt/boot/boot.tar.gz /mnt/d2/ || FAIL=1
+tar -xf /mnt/boot/boot.tar.gz -C /mnt/d2/ --no-same-owner || FAIL=1
+mkdir -p /mnt/d2/isolinux
+cp -av /mnt/boot/vmlinuz64 /mnt/boot/initrd.img /mnt/d2/isolinux/ || FAIL=1
 echo "** Copying EFI boot folder **"
-cp /mnt/boot/efi.tar.gz /mnt/d2/
-tar -xf /mnt/boot/efi.tar.gz -C /mnt/d1/
+cp /mnt/boot/efi.tar.gz /mnt/d2/ || FAIL=1
+tar -xf /mnt/boot/efi.tar.gz -C /mnt/d1/ --no-same-owner || FAIL=1
 echo "** Copying add-on packages **"
 rsync -av ${EXCLUDE} /mnt/boot/static-addons-*.img /mnt/d2/
 
-## Install grub on the new filesystem ##
+## Install grub for legacy BIOS boot: boot.img in the MBR (440 bytes, leaving
+## the partition table alone) and core.img in the gap before partition 1.
+## UEFI boot needs nothing more than EFI/boot/bootx64.efi on partition 1.
 echo "Installing the bootloader"
-grub-install /dev/${disk} --root-directory=/mnt/d2 --no-floppy --recheck --force
+dd if=/mnt/d2/boot/grub/i386-pc/boot.img of=/dev/${disk} bs=440 count=1 conv=notrunc,fsync || FAIL=1
+dd if=/mnt/d2/boot/grub/i386-pc/core.img of=/dev/${disk} bs=512 seek=1 conv=notrunc,fsync || FAIL=1
 
 ## Wait for disk to sync, then cleanup ##
 echo "Waiting for data to finish writing to your disk."
@@ -159,6 +163,10 @@ sync
 #clear
 umount /mnt/d2
 umount /mnt/d1
+if [ $FAIL -ne 0 ]; then
+	echo "${bold}Something went wrong above; this USB drive may not boot.${normal}"
+	exit 1
+fi
 echo "Your new USB drive is ready!"
 
 
