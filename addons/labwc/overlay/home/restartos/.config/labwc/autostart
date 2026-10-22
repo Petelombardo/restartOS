@@ -23,7 +23,7 @@ kanshi > /dev/null 2>&1 &
 # clipboard history for Super+V (rc.xml)
 wl-paste --watch cliphist store > /dev/null 2>&1 &
 
-# night light (wlsunset; settings in restartos-display, which stops it while locked)
+# night light (wlsunset; settings in restartos-display)
 restartos-display nightlight
 
 # polkit agent for GUI privilege prompts

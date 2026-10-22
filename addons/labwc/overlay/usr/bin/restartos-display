@@ -1,7 +1,8 @@
 #!/bin/sh
 # Screen power + waybar refit for labwc, called by swayidle and kanshi.
-#   lock     swayidle timeout/before-sleep: swaylock, refit windows after unlock
-#   nightlight  (re)start wlsunset (autostart, and after unlock)
+#   lock     swayidle timeout/before-sleep: swaylock (relaunched if labwc kills
+#            it), returns once locked; refit windows after unlock
+#   nightlight  (re)start wlsunset (autostart)
 #   idle     swayidle timeout: outputs off, stop kanshi
 #   resume   swayidle resume:  restart kanshi (it re-enables outputs), outputs on
 #   changed  kanshi exec, after any output (re)appeared: refit windows
@@ -28,12 +29,18 @@
 # Even so, maximized windows (covered ones especially) sometimes stay over the
 # new waybar after resume, so once it's up the refit presses W-A-S-F12 via wtype:
 # an rc.xml ForEach keybind that un- and re-maximizes every maximized window.
-# wlsunset is stopped while locked: with it running, swaylock sometimes died
-# on wake and left labwc locked with nothing to unlock it (black screen, only
-# a cursor). Night light: mildly warmer 19:30-07:00 at 5000K (wlsunset's
-# default 4000K was too strong); needs gamma control from the display driver.
+# An output vanishing and coming back while locked (the KTC flapping above,
+# every ~12s during standby) can make swaylock 1.8.2 commit a lock surface at a
+# stale size; labwc 0.8.3 then disconnects it ("committed surface dimensions do
+# not match last acked configure") and the session stays locked with nothing to
+# unlock it: black screen, only a cursor. swaylock still exits 0, so 'locker'
+# goes by the Wayland error on its stderr and starts a new swaylock, which labwc
+# lets take over the lock. Repro: lock, then echo off/detect on the HDMI status.
+# Night light: mildly warmer 19:30-07:00 at 5000K (wlsunset's default 4000K was
+# too strong); needs gamma control from the display driver.
 F=${XDG_RUNTIME_DIR:-/tmp}/restartos-screen-off
 R=${XDG_RUNTIME_DIR:-/tmp}/restartos-refit
+L=${XDG_RUNTIME_DIR:-/tmp}/restartos-lock
 refit() {   # refit <delay>: restart waybar once nothing has asked again for <delay>s
 	local me=$$.$(date +%s%N)
 	echo "$me" > "$R"
@@ -75,12 +82,31 @@ nightlight)
 	pkill -x wlsunset
 	setsid -f wlsunset -t 5000 -S 07:00 -s 19:30 < /dev/null > /dev/null 2>&1 ;;
 lock)
-	pkill -x wlsunset
-	pgrep -x swaylock > /dev/null || swaylock -f -c 000000
-	setsid -f "$0" unlocked < /dev/null > /dev/null 2>&1 ;;
-unlocked)   # (internal) wait for swaylock to exit, then night light + refit
-	while pgrep -x swaylock > /dev/null; do sleep 0.2; done
-	"$0" nightlight
+	# one locker at a time (timeout and before-sleep both lock); it inherits fd 9
+	# and holds the flock until the screen is unlocked
+	exec 9> "$L.lock"
+	flock -n 9 || exit 0
+	pgrep -x swaylock > /dev/null && exit 0
+	rm -f "$L.ready"; mkfifo "$L.ready"
+	setsid -f "$0" locker < /dev/null > /dev/null 2>&1
+	# swayidle -w waits for this before sleeping: return once swaylock has locked
+	timeout 10 head -c 1 "$L.ready" > /dev/null
+	rm -f "$L.ready" ;;
+locker)     # (internal) run swaylock until a real unlock, then refit
+	exec 3> "$L.ready"
+	READY=3
+	while :; do
+		ERR=$(swaylock -c 000000 ${READY:+-R $READY} 2>&1 > /dev/null)
+		exec 3>&-; READY=
+		case $ERR in
+		*error*)
+			echo "swaylock was disconnected, locking again: $ERR" |
+				systemd-cat -t restartos-display -p warning
+			sleep 0.5 ;;
+		*) break ;;
+		esac
+	done
+	exec 9>&-   # release the lock flock; don't hand it to the new waybar
 	refit 0.3 ;;
 idle)
 	touch "$F"

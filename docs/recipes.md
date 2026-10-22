@@ -167,7 +167,12 @@ Current addons:
   that enables outputs, and `/usr/bin/restartos-display` (swayidle timeout/resume
   + kanshi exec) stops kanshi while idle and reloads waybar on resume/reconnect,
   and again after swaylock exits (swayidle locks via `restartos-display lock`): a
-  refit done while the lock screen is up doesn't stick.
+  refit done while the lock screen is up doesn't stick. An output flapping while
+  locked can make labwc 0.8.3 disconnect swaylock 1.8.2 ("committed surface
+  dimensions do not match last acked configure"), leaving the session locked with
+  no lock screen (black, cursor only); `restartos-display lock` keeps swaylock's
+  stderr and starts a new one on a Wayland error (it exits 0 either way), logged
+  to the journal as `restartos-display`.
   If kanshi isn't running, outputs stay dark. Test without touching the monitor:
   `echo off > /sys/class/drm/card*-HDMI-A-1/status`, then `echo detect`.
   USB audio with a bogus mixer dB range (check `/proc/asound/cardN/usbmixer`: the
@@ -184,7 +189,7 @@ Current addons:
   `/usr/bin` (needs libwayland-dev + wayland-protocols on the host). Changing the
   number of desktops: edit rc.xml and the waybar group/buttons/style together.
   Extras: clipboard history (`wl-paste --watch cliphist store` in autostart, Super+V
-  picks an entry through wofi), wlsunset night light 19:30-07:00 at 5000K (`restartos-display nightlight`, stopped while the screen is locked; needs the
+  picks an entry through wofi), wlsunset night light 19:30-07:00 at 5000K (`restartos-display nightlight`; needs the
   display driver's gamma control), wdisplays (monitor layout GUI; kanshi still applies
   its own config on the next output change, so copy what works into it), thunar-volman,
   ristretto (image viewer) + tumbler (thumbnail D-Bus service for ristretto/thunar).
