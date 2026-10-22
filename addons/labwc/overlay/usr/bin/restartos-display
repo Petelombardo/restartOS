@@ -1,6 +1,7 @@
 #!/bin/sh
 # Screen power + waybar refit for labwc, called by swayidle and kanshi.
 #   lock     swayidle timeout/before-sleep: swaylock, refit windows after unlock
+#   nightlight  (re)start wlsunset (autostart, and after unlock)
 #   idle     swayidle timeout: outputs off, stop kanshi
 #   resume   swayidle resume:  restart kanshi (it re-enables outputs), outputs on
 #   changed  kanshi exec, after any output (re)appeared: refit windows
@@ -27,6 +28,10 @@
 # Even so, maximized windows (covered ones especially) sometimes stay over the
 # new waybar after resume, so once it's up the refit presses W-A-S-F12 via wtype:
 # an rc.xml ForEach keybind that un- and re-maximizes every maximized window.
+# wlsunset is stopped while locked: with it running, swaylock sometimes died
+# on wake and left labwc locked with nothing to unlock it (black screen, only
+# a cursor). Night light: mildly warmer 19:30-07:00 at 5000K (wlsunset's
+# default 4000K was too strong); needs gamma control from the display driver.
 F=${XDG_RUNTIME_DIR:-/tmp}/restartos-screen-off
 R=${XDG_RUNTIME_DIR:-/tmp}/restartos-refit
 refit() {   # refit <delay>: restart waybar once nothing has asked again for <delay>s
@@ -66,11 +71,16 @@ case $1 in
 autoscale)
 	[ -e "$F" ] || autoscale
 	exec "$0" changed ;;
+nightlight)
+	pkill -x wlsunset
+	setsid -f wlsunset -t 5000 -S 07:00 -s 19:30 < /dev/null > /dev/null 2>&1 ;;
 lock)
+	pkill -x wlsunset
 	pgrep -x swaylock > /dev/null || swaylock -f -c 000000
 	setsid -f "$0" unlocked < /dev/null > /dev/null 2>&1 ;;
-unlocked)   # (internal) wait for swaylock to exit, then refit
+unlocked)   # (internal) wait for swaylock to exit, then night light + refit
 	while pgrep -x swaylock > /dev/null; do sleep 0.2; done
+	"$0" nightlight
 	refit 0.3 ;;
 idle)
 	touch "$F"
@@ -84,5 +94,5 @@ resume)
 changed)
 	if [ -e "$F" ]; then wlopm --off '*'; else refit 2; fi ;;
 *)
-	echo "usage: $0 lock|idle|resume|changed|autoscale" >&2; exit 1 ;;
+	echo "usage: $0 lock|nightlight|idle|resume|changed|autoscale" >&2; exit 1 ;;
 esac

@@ -184,7 +184,7 @@ Current addons:
   `/usr/bin` (needs libwayland-dev + wayland-protocols on the host). Changing the
   number of desktops: edit rc.xml and the waybar group/buttons/style together.
   Extras: clipboard history (`wl-paste --watch cliphist store` in autostart, Super+V
-  picks an entry through wofi), wlsunset night light 19:30-07:00 at 5000K (autostart; needs the
+  picks an entry through wofi), wlsunset night light 19:30-07:00 at 5000K (`restartos-display nightlight`, stopped while the screen is locked; needs the
   display driver's gamma control), wdisplays (monitor layout GUI; kanshi still applies
   its own config on the next output change, so copy what works into it), thunar-volman,
   ristretto (image viewer) + tumbler (thumbnail D-Bus service for ristretto/thunar).
