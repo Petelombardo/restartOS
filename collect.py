@@ -38,14 +38,22 @@ for p in raw:
     if os.path.lexists(c):
         paths.add(c)
 
-# update-alternatives: master link -> /etc/alternatives/x -> real target
-for d in ('/usr/bin', '/usr/sbin'):
-    for name in os.listdir(d):
-        link = os.path.join(d, name)
-        if os.path.islink(link) and os.readlink(link).startswith('/etc/alternatives/'):
-            alt = os.readlink(link)
-            if os.path.realpath(link) in paths:
-                paths.update({link, alt, '/etc/alternatives'})
+# update-alternatives: link -> /etc/alternatives/x -> real target. Links come from
+# the dpkg admin db (master and slaves), not just /usr/bin, so library alternatives
+# such as libblas.so.3 / liblapack.so.3 are included too.
+# admin file: mode, master link, then (slave name, slave link) pairs up to a blank line
+ADMIN = '/var/lib/dpkg/alternatives'
+for name in os.listdir(ADMIN):
+    lines = open(os.path.join(ADMIN, name)).read().split('\n')
+    links = {name: lines[1]}
+    i = 2
+    while i + 1 < len(lines) and lines[i]:
+        links[lines[i]] = lines[i + 1]
+        i += 2
+    for n, link in links.items():
+        alt = '/etc/alternatives/' + n
+        if os.path.islink(link) and os.readlink(link) == alt and os.path.realpath(link) in paths:
+            paths.update({canon(link), alt, '/etc/alternatives'})
 
 # make sure every parent directory is listed so tar --no-recursion recreates it
 for p in list(paths):
