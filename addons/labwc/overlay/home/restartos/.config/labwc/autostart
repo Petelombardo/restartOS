@@ -23,8 +23,9 @@ kanshi > /dev/null 2>&1 &
 # clipboard history for Super+V (rc.xml)
 wl-paste --watch cliphist store > /dev/null 2>&1 &
 
-# night light: warmer colours 19:30-07:00 (needs gamma control from the display driver)
-wlsunset -S 07:00 -s 19:30 > /dev/null 2>&1 &
+# night light: mildly warmer colours 19:30-07:00 (5000K; wlsunset default 4000K was too strong)
+# (needs gamma control from the display driver)
+wlsunset -t 5000 -S 07:00 -s 19:30 > /dev/null 2>&1 &
 
 # polkit agent for GUI privilege prompts
 lxpolkit > /dev/null 2>&1 &
