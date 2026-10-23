@@ -110,8 +110,11 @@ to always becomes `system.img`.
 * **cloud-guest-utils:** `growpart` grows a partition after its virtual disk is
   enlarged, and `ec2metadata` reads EC2 instance metadata. No maintainer scripts. GPT
   is resized with `sfdisk` (from `fdisk`), so gdisk, a Recommends, is left out.
-* **Name resolution:** `hosts: files dns mdns4_minimal` — unicast DNS first (split DNS
-  can use `.local` domains like corp.local), mDNS only as the fallback.
+* **Name resolution:** `hosts: files mdns4_minimal [NOTFOUND=return] dns` (Debian's
+  default). mDNS goes first: with DNS first, a stale DHCP-registered record for a
+  `.local` host on the corporate DNS shadows the live mDNS answer, and ssh goes to a dead
+  address. Split-DNS `.local` names (corp.local) still resolve: nothing answers them over
+  mDNS, so the lookup falls through to DNS.
 * **Locale:** set in `overlay/etc/locale.conf`; `/etc/default/locale` must stay a symlink
   to it — trixie's systemd tmpfiles rule replaces it with that symlink at every boot, so
   a plain file there is lost and the desktop session ends up without UTF-8.
