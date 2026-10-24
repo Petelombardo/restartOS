@@ -27,13 +27,32 @@ squashfs-tools
 mdadm
 # mkfs/fsck for the other common filesystems (kernel drivers are in the board kernel)
 exfatprogs btrfs-progs xfsprogs f2fs-tools
+# HFS+ (hpmount/hpcopy etc.; mkfs.hfsplus/fsck.hfsplus come from hfsprogs, which is
+# in trixie non-free, so it is in packages-amd64.txt)
+hfsplus
+# VMware VMFS (read-only, FUSE: vmfs-fuse / vmfs6-fuse, debugvmfs)
+vmfs-tools vmfs6-tools
 # data recovery: ddrescue; disk health: smartctl (smartd not enabled)
 gddrescue smartmontools
 # NFS server (and client: nfs-common, rpcbind). Export real disks, not the RAM root
 nfs-kernel-server
 
+# Recovery: testdisk (partition tables, NTFS boot sector; includes photorec),
+# nvme-cli/hdparm (drive health, secure erase), nwipe (disk wiping)
+testdisk nvme-cli hdparm nwipe
+# Windows repair: efibootmgr (recreate the "Windows Boot Manager" entry),
+# chntpw/reged and hivexsh/hivexregedit (offline registry and BCD hives),
+# wimtools (extract from install.wim). BitLocker: cryptsetup open --type bitlk
+# BIOS/MBR boot code: overlay/usr/lib/syslinux/mbr/mbr.bin (from syslinux-common), boots
+# the active partition: dd if=/usr/lib/syslinux/mbr/mbr.bin of=/dev/sdX bs=440 count=1 conv=notrunc
+efibootmgr chntpw libhivex-bin wimtools
+
 # Tools
 rsync pv lz4 zstd xz-utils bzip2 unzip file psmisc lsof pciutils usbutils
+# hex editor for disks and files (hexedit /dev/sdX)
+hexedit
+# disk usage browser
+ncdu
 nano vim-tiny htop bash-completion figlet fastfetch kbd
 chrony haveged sysstat uuid
 

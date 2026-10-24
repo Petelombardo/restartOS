@@ -231,8 +231,9 @@ Current addons:
   find them up to date instead of recompiling into tmpfs at every boot. No AWS config:
   `aws configure` on the device, then `make-persistent add /home/restartos/.aws`.
 * **gparted** — bases system + labwc; gparted plus the filesystem tools the base lacks
-  (mtools for FAT labels, udftools, jfsutils; trixie has no hfsprogs, so no HFS/HFS+). ext*, FAT, NTFS (ntfs-3g has
-  ntfsresize), exFAT, btrfs, xfs, f2fs, LVM and LUKS tools are in the base, along with
+  (mtools for FAT labels, udftools, jfsutils). ext*, FAT, NTFS (ntfs-3g has
+  ntfsresize), exFAT, btrfs, xfs, f2fs, HFS+ (hfsplus; hfsprogs on amd64 only, it
+  is in non-free), VMFS (read-only), LVM and LUKS tools are in the base, along with
   gddrescue. Debian's `/usr/sbin/gparted` launcher uses pkexec, which drops
   WAYLAND_DISPLAY, and root can't open Xwayland (Debian builds it without the xhost
   workaround), so the overlay adds `/usr/local/bin/gparted` (first in PATH):

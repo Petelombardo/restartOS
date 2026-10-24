@@ -3,4 +3,6 @@
 # host's apt sources) and CPU microcode.
 firmware-linux-free firmware-misc-nonfree firmware-realtek firmware-iwlwifi
 firmware-amd-graphics firmware-mediatek
+# mkfs.hfsplus/fsck.hfsplus (trixie non-free; the x86 host has non-free enabled)
+hfsprogs
 intel-microcode amd64-microcode

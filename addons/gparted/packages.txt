@@ -1,5 +1,6 @@
 # restartOS 15 gparted addon (bases system + labwc).
 # ext*, FAT, NTFS, exFAT, btrfs, xfs, f2fs, LVM and LUKS tools are already in system.img.
 gparted
-# FAT labels (mlabel), UDF, JFS. No HFS/HFS+: trixie has no hfsprogs
+# HFS+ is in the base (hfsplus; hfsprogs on amd64, it is in trixie non-free).
+# FAT labels (mlabel), UDF, JFS.
 mtools udftools jfsutils
