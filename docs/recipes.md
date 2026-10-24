@@ -259,6 +259,10 @@ Current addons:
   to A2DP afterwards; for better listening on calls, use another mic and keep the earbuds on A2DP.
 * **mpv** — bases system + labwc; just `mpv`, kept out of labwc because its ffmpeg
   stack adds ~140 MB (uncompressed) of new dependencies.
+  `overlay/etc/mpv/mpv.conf` sets `vo=gpu`: on RK3588 with Mesa 25.0 Panfrost the
+  default `gpu-next` renderer hangs the whole system ~10 s into playback (software
+  decode, `--vo=null` and `--vo=wlshm` are fine, and `PAN_MESA_DEBUG=linear` doesn't
+  help). Revisit after a Mesa upgrade.
 * **glusterfs** — GlusterFS built from source, not from debs: configure + make in
   `/builds/source/glusterfs/glusterfs-<ver>` first (`GLUSTER_SRC=` picks another tree).
   `packages.txt` only lists its runtime libraries; `post-build` runs `make install-strip`
