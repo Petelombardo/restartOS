@@ -1,6 +1,8 @@
 #!/bin/bash
 # Build a restartOS 15 addon from a recipe in addons/<name>/:
 #   packages.txt   packages to include (deps already in the base images are skipped)
+#   packages-<arch>.txt  optional: extra packages on that architecture only
+#                  (dpkg --print-architecture: arm64, amd64)
 #   bases          optional: images this addon sits on, one per line
 #                  (default /builds/packages/system.img)
 #   overlay/       extra files/symlinks copied on top (configs, unit enables, ...)
@@ -43,8 +45,11 @@ if [ -f "$A/bases" ]; then
 	echo "== Bases: $BASES"
 fi
 
+ARCH=$(dpkg --print-architecture)
+SEEDS=$(cat "$A/packages.txt" $(ls "$A/packages-$ARCH.txt" 2>/dev/null) | grep -v '^#')
+
 echo "== create-package $NAME"
-DEST=$DEST /builds/scripts/create-package "$NAME" $(grep -v '^#' "$A/packages.txt") | grep -v "^'/.*' -> '/"
+DEST=$DEST /builds/scripts/create-package "$NAME" $SEEDS | grep -v "^'/.*' -> '/"
 
 if [ -d "$A/overlay" ]; then
 	echo "== Applying overlay"

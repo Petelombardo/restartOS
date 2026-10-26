@@ -1,0 +1,3 @@
+# arm64: qemu-system-aarch64 (KVM with -M virt -cpu host -enable-kvm) and the
+# UEFI firmware for -M virt guests (/usr/share/qemu-efi-aarch64/QEMU_EFI.fd).
+qemu-system-arm qemu-efi-aarch64

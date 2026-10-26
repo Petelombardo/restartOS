@@ -139,6 +139,7 @@ to always becomes `system.img`.
 | File | Purpose |
 |---|---|
 | `packages.txt` | packages for the addon; deps already in the bases are skipped, missing ones included |
+| `packages-<arch>.txt` | optional: extra packages on that architecture only (`dpkg --print-architecture`), e.g. qemu's emulator and firmware |
 | `bases` | optional: images below this addon, one per line (default `/builds/packages/system.img`) |
 | `overlay/` | extra files; `overlay/home/<user>/...` is owned by that user, the rest by root |
 | `post-build` | optional bash run as root with `$DEST`, for non-deb content (vendor binaries) |
@@ -263,6 +264,14 @@ Current addons:
   default `gpu-next` renderer hangs the whole system ~10 s into playback (software
   decode, `--vo=null` and `--vo=wlshm` are fine, and `PAN_MESA_DEBUG=linear` doesn't
   help). Revisit after a Mesa upgrade.
+* **qemu** — bases system + labwc; QEMU with KVM and its GTK/SDL display
+  (`qemu-system-gui`) plus `qemu-utils`, kept out of labwc for its size. The
+  emulator and firmware are per architecture: arm64 gets `qemu-system-arm`
+  (`qemu-system-aarch64`) + `qemu-efi-aarch64`, amd64 gets `qemu-system-x86` + `ovmf`.
+  `/scripts/startup/qemu` adds restartos to the `kvm` group at boot, so `/dev/kvm`
+  works from ssh too, not only from the desktop seat. arm64 example:
+  `qemu-system-aarch64 -M virt -cpu host -enable-kvm -m 2G -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd -display gtk ...`.
+  Persist disk images by keeping them on a mounted disk, not in RAM.
 * **glusterfs** — GlusterFS built from source, not from debs: configure + make in
   `/builds/source/glusterfs/glusterfs-<ver>` first (`GLUSTER_SRC=` picks another tree).
   `packages.txt` only lists its runtime libraries; `post-build` runs `make install-strip`

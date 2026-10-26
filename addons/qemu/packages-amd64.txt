@@ -1,0 +1,3 @@
+# amd64: qemu-system-x86_64 (KVM via kvm_intel/kvm_amd) and the UEFI firmware
+# (/usr/share/OVMF); SeaBIOS for legacy boot comes in as a dependency.
+qemu-system-x86 ovmf

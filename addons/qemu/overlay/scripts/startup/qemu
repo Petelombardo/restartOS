@@ -1,0 +1,6 @@
+#!/bin/bash
+# Let restartos use /dev/kvm (group kvm, 0660) from ssh and scripts too, not only
+# from the desktop seat that udev's uaccess ACL covers. The base's /etc/group isn't
+# shadowed by this addon, so the membership is added at boot.
+gpasswd -a restartos kvm >/dev/null
+exit 0

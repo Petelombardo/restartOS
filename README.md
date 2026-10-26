@@ -39,7 +39,7 @@ That tree is compressed into a squashfs `.img`. So:
 
 Current addons: `labwc` (desktop: labwc, greetd, waybar, pipewire), `chromium`,
 `ai` (Claude Code + pi, copied from the build user's installs, no credentials),
-`awscli`, `podman`, `gparted`, `nvidia` (amd64: NVIDIA GPU firmware for nouveau), `bluetooth` (bluez + PipeWire BT, on labwc), `mpv` (on labwc).
+`awscli`, `podman`, `gparted`, `nvidia` (amd64: NVIDIA GPU firmware for nouveau), `bluetooth` (bluez + PipeWire BT, on labwc), `mpv` (on labwc), `qemu` (on labwc; KVM + GTK display, per-arch emulator).
 
 ## Repo layout
 
@@ -117,8 +117,8 @@ ln -sfn static-addons-system-trixie /builds/system
 cd /builds/system && sudo ./compress "what changed" && cd -
 
 # 2. addons -> /builds/packages/static-addons-<name>.img
-#    (labwc before chromium, bluetooth and mpv: their bases are system + labwc)
-for a in labwc chromium bluetooth mpv ai awscli podman gparted nvidia; do   # nvidia: amd64 only
+#    (labwc before chromium, bluetooth, mpv and qemu: their bases are system + labwc)
+for a in labwc chromium bluetooth mpv qemu ai awscli podman gparted nvidia; do   # nvidia: amd64 only
 	sudo ./build-addon $a
 	(cd /builds/static-addons-$a && sudo ./compress "what changed")
 done

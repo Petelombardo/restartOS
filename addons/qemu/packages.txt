@@ -1,0 +1,6 @@
+# restartOS 15 qemu addon (bases system + labwc): QEMU with KVM and its GTK/SDL
+# display, kept out of labwc for its size. The emulator and firmware differ per
+# architecture, so they are in packages-<arch>.txt; this file has the common parts.
+#   qemu-system-gui  GTK/SDL display and audio modules (-display gtk|sdl)
+#   qemu-utils       qemu-img, qemu-nbd
+qemu-system-gui qemu-utils
