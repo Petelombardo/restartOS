@@ -39,7 +39,7 @@ That tree is compressed into a squashfs `.img`. So:
 
 Current addons: `labwc` (desktop: labwc, greetd, waybar, pipewire), `chromium`,
 `ai` (Claude Code + pi, copied from the build user's installs, no credentials),
-`awscli`, `podman`, `gparted`, `nvidia` (amd64: NVIDIA GPU firmware for nouveau), `bluetooth` (bluez + PipeWire BT, on labwc), `mpv` (on labwc), `qemu` (on labwc; KVM + GTK display, per-arch emulator).
+`awscli`, `podman`, `gparted`, `nvidia` (amd64: NVIDIA GPU firmware for nouveau), `bluetooth` (bluez + PipeWire BT, on labwc), `mpv` (on labwc), `qemu` (on labwc; KVM + GTK display, per-arch emulator, `vm` helper for repairing a machine's disk from a recovery ISO).
 
 ## Repo layout
 

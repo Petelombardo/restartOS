@@ -1,0 +1,300 @@
+#!/bin/bash
+# vm: start a QEMU VM with the usual pieces in place, mainly for repairing or
+# cloning a machine from restartOS: boot a recovery ISO against the machine's
+# own disk, fix it, reboot into it.
+#
+# usage: vm [options] [-- extra qemu options]
+#   -d, --disk PATH      attach a disk: /dev/sdX, /dev/nvme0n1, a .qcow2 or a raw image
+#                        (repeatable; the first one is the boot disk)
+#   -n, --new FILE:SIZE  create a qcow2 disk (e.g. win.qcow2:60G) unless it exists, attach it
+#   -i, --iso FILE       attach an ISO as a CD-ROM (repeatable, e.g. installer + driver ISO)
+#   -b, --bridge [DEV]   network on the LAN through a bridge on the wired port DEV
+#                        (default: the active wired one); default is NAT through the host
+#       --no-net         no network card
+#   -m, --mem SIZE       RAM, e.g. 4G (default: half the RAM, at most 8G)
+#   -c, --cpus N         CPUs (default: half the cores)
+#       --bus BUS        disk bus: virtio (default, fastest), sata or nvme. Use sata
+#                        for an installed Windows: it has no virtio drivers.
+#       --bios           x86: legacy BIOS (SeaBIOS) instead of UEFI, for MBR installs
+#       --boot cd|disk   boot device (default: cd when an ISO is attached, else disk)
+#   -s, --snapshot       don't write to any disk: changes go to a temp file and are
+#                        dropped when the VM exits (try a repair safely first)
+#       --vnc            show the screen over VNC instead of a window; this is
+#                        the default when there's no desktop (e.g. over ssh)
+#       --dry-run        print the qemu command instead of running it
+#   -h, --help
+#
+# Examples:
+#   vm --disk /dev/sda --iso ~/Downloads/systemrescue.iso   repair this machine's disk
+#   vm -d /dev/sda -d /dev/sdb -i clonezilla.iso             clone sda to sdb
+#   vm --new win11.qcow2:64G --iso Win11.iso --bus sata      install into a disk file
+#
+# The VM shows in a window on the desktop. Without one (ssh), its screen is on VNC
+# at <this host>:590N with a one-time password, printed at start; Ctrl-C stops it.
+#
+# Runs as restartos (the disk group can open /dev disks); sudo is used for the bridge.
+# A disk with a mounted filesystem, or the restartOS boot disk itself, is refused:
+# two systems writing one filesystem corrupts it.
+set -e -o pipefail
+
+usage() { sed -n '/^# usage:/,/^# Runs as/p' "$0" | sed 's/^# \{0,1\}//' | head -n -1; exit "${1:-0}"; }
+die() { echo "vm: $*" >&2; exit 1; }
+
+DISKS=(); NEWS=(); ISOS=()
+BRIDGE=0; BRIDGE_DEV=""; NET=1
+MEM=""; CPUS=""; BUS=virtio; LEGACY=0; BOOT=""; SNAPSHOT=0; DRYRUN=0; VNC=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-d|--disk) DISKS+=("${2:?--disk needs a path}"); shift ;;
+		-n|--new) NEWS+=("${2:?--new needs FILE:SIZE}"); shift ;;
+		-i|--iso) ISOS+=("${2:?--iso needs a file}"); shift ;;
+		-b|--bridge) BRIDGE=1; if [ -n "$2" ] && [ "${2#-}" = "$2" ]; then BRIDGE_DEV=$2; shift; fi ;;
+		--no-net) NET=0 ;;
+		-m|--mem) MEM=${2:?}; shift ;;
+		-c|--cpus) CPUS=${2:?}; shift ;;
+		--bus) BUS=${2:?}; shift ;;
+		--bios) LEGACY=1 ;;
+		--boot) BOOT=${2:?}; shift ;;
+		-s|--snapshot) SNAPSHOT=1 ;;
+		--vnc) VNC=1 ;;
+		--dry-run) DRYRUN=1 ;;
+		-h|--help) usage ;;
+		--) shift; break ;;
+		*) echo "vm: unknown option $1" >&2; usage 1 ;;
+	esac
+	shift
+done
+EXTRA=("$@")
+
+case "$BUS" in virtio|sata|nvme) ;; *) die "--bus must be virtio, sata or nvme" ;; esac
+case "$BOOT" in ""|cd|disk) ;; *) die "--boot must be cd or disk" ;; esac
+
+for n in "${NEWS[@]}"; do
+	f=${n%:*}; size=${n##*:}
+	[ "$f" != "$n" ] && [ -n "$size" ] || die "--new wants FILE:SIZE, e.g. disk.qcow2:40G"
+	if [ -e "$f" ]; then
+		echo "== $f exists, attaching it as is"
+	elif [ $DRYRUN -eq 0 ]; then
+		qemu-img create -q -f qcow2 "$f" "$size"
+		echo "== Created $f ($size qcow2)"
+	fi
+	DISKS+=("$f")
+done
+[ ${#DISKS[@]} -gt 0 ] || [ ${#ISOS[@]} -gt 0 ] || die "nothing to boot: give --disk, --new or --iso (see vm --help)"
+for i in "${ISOS[@]}"; do [ -f "$i" ] || die "no ISO at $i"; done
+
+ARCH=$(uname -m)
+NCPU=$(nproc)
+CPUS=${CPUS:-$(( NCPU > 1 ? NCPU / 2 : 1 ))}
+if [ -z "$MEM" ]; then
+	MB=$(awk '/^MemTotal:/ {print int($2 / 1024 / 2)}' /proc/meminfo)
+	[ "$MB" -gt 8192 ] && MB=8192
+	MEM=${MB}M
+fi
+
+# KVM if we can use it, otherwise emulation (works, but many times slower)
+if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+	ACCEL=(-accel kvm -cpu host)
+else
+	echo "== No usable /dev/kvm: running without KVM (slow)." >&2
+	[ -e /dev/kvm ] && echo "   $(id -un) can't open /dev/kvm; log in again to pick up the kvm group." >&2
+	ACCEL=(-accel tcg -cpu max)
+fi
+
+STATE=${XDG_RUNTIME_DIR:-/tmp}/vm.$$
+mkdir -p "$STATE"
+TAP=""; BR=""; BRIDGE_MADE=0; BRIDGE_PREV=""
+
+cleanup() {
+	if [ -n "$TAP" ]; then
+		sudo ip link del "$TAP" 2>/dev/null || true
+	fi
+	# Take the bridge down only if we made it and no other VM's tap is still on it
+	if [ $BRIDGE_MADE -eq 1 ] && [ -z "$(ls /sys/class/net/$BR/brif 2>/dev/null | grep -v "^$BRIDGE_DEV\$")" ]; then
+		echo "== Removing bridge $BR, restoring $BRIDGE_DEV"
+		sudo nmcli -w 15 con delete vm-bridge-port vm-bridge >/dev/null 2>&1 || true
+		[ -n "$BRIDGE_PREV" ] && sudo nmcli -w 30 con up "$BRIDGE_PREV" >/dev/null 2>&1 || true
+	fi
+	rm -rf "$STATE"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# --- Firmware and machine ---
+Q=()
+if [ "$ARCH" = aarch64 ]; then
+	QEMU=qemu-system-aarch64
+	[ $LEGACY -eq 1 ] && die "--bios is x86 only; arm64 VMs always boot UEFI"
+	CODE=/usr/share/AAVMF/AAVMF_CODE.fd; VARS=/usr/share/AAVMF/AAVMF_VARS.fd
+	Q+=(-M virt)
+	DISPLAY_DEV=(-device virtio-gpu-pci)
+	NIC_MODEL=virtio-net-pci
+else
+	QEMU=qemu-system-x86_64
+	CODE=/usr/share/OVMF/OVMF_CODE_4M.fd; VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
+	Q+=(-M q35)
+	DISPLAY_DEV=(-vga std)
+	NIC_MODEL=e1000e      # Windows and every recovery ISO have a driver for it
+fi
+Q+=("${ACCEL[@]}" -smp "$CPUS" -m "$MEM" -name "vm: ${DISKS[0]:-${ISOS[0]}}")
+
+if [ $LEGACY -eq 0 ]; then
+	# UEFI variables (boot entries) live next to a disk file so it boots again next
+	# time; for /dev disks they're kept for this run only.
+	VARSFILE=$STATE/efivars.fd
+	d=${DISKS[0]}
+	[ -n "$d" ] && [ -f "$d" ] && VARSFILE=${d%.*}.efivars.fd
+	[ -f "$VARSFILE" ] || [ $DRYRUN -eq 1 ] || cp "$VARS" "$VARSFILE"
+	Q+=(-drive "if=pflash,format=raw,unit=0,readonly=on,file=$CODE"
+	    -drive "if=pflash,format=raw,unit=1,file=$VARSFILE")
+fi
+
+# A window on the desktop, or VNC when there's no desktop to put it on. VNC
+# listens on the LAN (the point is reaching the VM from another machine) with a
+# random 8-character password (the most VNC allows), passed in a file, not on
+# the command line where ps would show it.
+[ -z "$WAYLAND_DISPLAY$DISPLAY" ] && VNC=1
+if [ $VNC -eq 1 ]; then
+	VNCN=0
+	while [ $VNCN -lt 100 ] && [ -n "$(ss -Hltn "sport = :$((5900 + VNCN))")" ]; do VNCN=$((VNCN + 1)); done
+	VNCPASS=$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 8 || true)
+	(umask 077; echo -n "$VNCPASS" > "$STATE/vncpass")
+	Q+=(-object "secret,id=vncpass,file=$STATE/vncpass" -vnc ":$VNCN,password-secret=vncpass" -display none)
+else
+	Q+=(-display gtk)
+fi
+Q+=("${DISPLAY_DEV[@]}" -device qemu-xhci -device usb-tablet -device usb-kbd)
+
+# --- Disks ---
+# Refuse a /dev disk the host is using. The restartOS disk is found by its label.
+check_dev() {
+	local dev=$1 real
+	real=$(readlink -f "$dev")
+	[ -b "$real" ] || die "$dev is not a block device"
+	if lsblk -nro MOUNTPOINTS "$real" | grep -q .; then
+		lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINTS "$real" >&2
+		die "$dev has mounted filesystems; unmount them first (sudo umount ...)"
+	fi
+	if lsblk -nro LABEL "$real" | grep -qx restartos; then
+		die "$dev is the restartOS boot disk"
+	fi
+	if swapon --show=NAME --noheadings | grep -q "^$real"; then
+		die "$dev has active swap (sudo swapoff ...)"
+	fi
+	[ -r "$real" ] && [ -w "$real" ] || die "can't open $dev read-write (is $(id -un) in the disk group?)"
+}
+
+SATA_PORT=0
+add_ahci() {   # $1 = device on the AHCI bus (ide-hd / ide-cd ...)
+	if [ "$ARCH" = aarch64 ] && [ $SATA_PORT -eq 0 ]; then
+		Q+=(-device ich9-ahci,id=ahci0)
+	fi
+	local bus=ide
+	[ "$ARCH" = aarch64 ] && bus=ahci0
+	Q+=(-device "$1,bus=$bus.$SATA_PORT")
+	SATA_PORT=$((SATA_PORT + 1))
+}
+
+[ "$BOOT" = "" ] && { [ ${#ISOS[@]} -gt 0 ] && BOOT=cd || BOOT=disk; }
+BI=1     # bootindex: the boot device gets 0, everything else counts up from 1
+n=0
+for d in "${DISKS[@]}"; do
+	if [ -b "$(readlink -f "$d")" ]; then
+		[ $DRYRUN -eq 1 ] || check_dev "$d"
+		fmt=raw
+		echo "== Disk $d: $(lsblk -dno SIZE,MODEL "$(readlink -f "$d")" | xargs)"
+	elif [ -f "$d" ]; then
+		fmt=$(qemu-img info "$d" | sed -n 's/^file format: //p')
+		echo "== Disk $d ($fmt)"
+	elif [ $DRYRUN -eq 1 ]; then
+		fmt=qcow2
+	else
+		die "no disk at $d"
+	fi
+	idx=$BI; [ $n -eq 0 ] && [ "$BOOT" = disk ] && idx=0 || BI=$((BI + 1))
+	# cache=none: write straight to the disk, so nothing is lost if the host goes down
+	Q+=(-drive "if=none,id=disk$n,format=$fmt,file=$d,cache=none,discard=unmap")
+	case "$BUS" in
+		virtio) Q+=(-device "virtio-blk-pci,drive=disk$n,bootindex=$idx") ;;
+		nvme)   Q+=(-device "nvme,drive=disk$n,serial=vmdisk$n,bootindex=$idx") ;;
+		sata)   add_ahci "ide-hd,drive=disk$n,bootindex=$idx" ;;
+	esac
+	n=$((n + 1))
+done
+
+# CD-ROMs: AHCI on x86 (Windows setup can read it without extra drivers),
+# virtio-scsi on arm64 (the arm UEFI firmware boots from it)
+n=0
+for i in "${ISOS[@]}"; do
+	idx=$BI; [ $n -eq 0 ] && [ "$BOOT" = cd ] && idx=0 || BI=$((BI + 1))
+	Q+=(-drive "if=none,id=cd$n,media=cdrom,readonly=on,file=$i")
+	if [ "$ARCH" = aarch64 ]; then
+		[ $n -eq 0 ] && Q+=(-device virtio-scsi-pci,id=scsi0)
+		Q+=(-device "scsi-cd,bus=scsi0.0,drive=cd$n,bootindex=$idx")
+	else
+		add_ahci "ide-cd,drive=cd$n,bootindex=$idx"
+	fi
+	echo "== CD $i"
+	n=$((n + 1))
+done
+
+[ $SNAPSHOT -eq 1 ] && { Q+=(-snapshot); echo "== Snapshot mode: nothing is written to the disks"; }
+
+# --- Network ---
+# NAT (default): works on Wi-Fi and needs no setup; the VM can reach the LAN and
+# the internet, but nothing can connect in.
+# --bridge: the wired port goes into a bridge for as long as the VM runs, so the VM
+# is a machine on the LAN (own DHCP address). The host's address moves to the bridge
+# (same MAC, so DHCP gives the same IP); the connection blips for a few seconds.
+if [ $NET -eq 1 ] && [ $BRIDGE -eq 0 ]; then
+	Q+=(-nic "user,model=$NIC_MODEL")
+elif [ $NET -eq 1 ]; then
+	BR=br-vm
+	if [ ! -d /sys/class/net/$BR ]; then
+		if [ -z "$BRIDGE_DEV" ]; then
+			BRIDGE_DEV=$(nmcli -t -f DEVICE,TYPE,STATE device | awk -F: '$2 == "ethernet" && $3 == "connected" {print $1; exit}')
+			[ -n "$BRIDGE_DEV" ] || die "--bridge: no connected wired port (bridging doesn't work over Wi-Fi; use NAT, the default)"
+		fi
+		[ -d /sys/class/net/$BRIDGE_DEV ] || die "--bridge: no network device $BRIDGE_DEV"
+		BRIDGE_PREV=$(nmcli -g GENERAL.CONNECTION device show "$BRIDGE_DEV" 2>/dev/null || true)
+		MAC=$(cat /sys/class/net/$BRIDGE_DEV/address)
+		echo "== Bridging $BRIDGE_DEV into $BR (network drops for a few seconds)"
+		if [ $DRYRUN -eq 0 ]; then
+			BRIDGE_MADE=1
+			# autoconnect-ports: bringing up the bridge also brings up its port, which
+			# takes the device from its previous connection (restored in cleanup)
+			sudo nmcli con add type bridge ifname $BR con-name vm-bridge autoconnect no \
+				connection.autoconnect-ports true bridge.stp no bridge.mac-address "$MAC" \
+				ipv4.method auto ipv6.method auto >/dev/null
+			sudo nmcli con add type ethernet ifname "$BRIDGE_DEV" controller $BR port-type bridge \
+				con-name vm-bridge-port autoconnect no >/dev/null
+			sudo nmcli -w 60 con up vm-bridge >/dev/null || echo "   (no DHCP lease on $BR yet; the VM still gets one)"
+		fi
+	else
+		echo "== Using existing bridge $BR"
+	fi
+	TAP=vmtap$$
+	TAP=${TAP:0:15}
+	if [ $DRYRUN -eq 0 ]; then
+		sudo ip tuntap add dev "$TAP" mode tap user "$(id -un)"
+		sudo ip link set "$TAP" master $BR up
+	fi
+	# Locally administered MAC, different for each VM
+	VMMAC=$(printf '52:54:00:%02x:%02x:%02x' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)))
+	Q+=(-netdev "tap,id=net0,ifname=$TAP,script=no,downscript=no" -device "$NIC_MODEL,netdev=net0,mac=$VMMAC")
+fi
+
+Q+=("${EXTRA[@]}")
+
+if [ $DRYRUN -eq 1 ]; then
+	printf '%q ' "$QEMU" "${Q[@]}"; echo
+	exit 0
+fi
+echo "== Starting $QEMU: ${CPUS} CPUs, $MEM RAM, boot from $BOOT"
+if [ $VNC -eq 1 ]; then
+	echo "== Screen on VNC: $(hostname).local:$((5900 + VNCN)) ($(hostname -I | awk '{print $1}'):$((5900 + VNCN))), password $VNCPASS"
+	echo "   Ctrl-C here stops the VM (like pulling the plug: shut the guest down first)"
+else
+	echo "   Close the window to stop the VM"
+fi
+"$QEMU" "${Q[@]}"

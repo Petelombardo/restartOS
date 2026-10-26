@@ -272,6 +272,26 @@ Current addons:
   works from ssh too, not only from the desktop seat. arm64 example:
   `qemu-system-aarch64 -M virt -cpu host -enable-kvm -m 2G -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd -display gtk ...`.
   Persist disk images by keeping them on a mounted disk, not in RAM.
+  `ipxe-qemu` is listed explicitly: on arm64 it's only a Recommends, and without
+  its NIC ROMs every VM with a network card fails ("failed to find romfile").
+  `/usr/local/bin/vm` (overlay) starts a VM with the usual pieces set up, mainly to
+  repair or clone a machine: `vm --disk /dev/sda --iso rescue.iso`. Disks are
+  `/dev` disks, qcow2/raw files or `--new file.qcow2:40G`; ISOs attach as CD-ROMs
+  (AHCI on x86 so Windows setup sees them, virtio-scsi on arm64). It adds KVM (or
+  TCG with a warning), UEFI (AAVMF/OVMF; `--bios` = SeaBIOS on x86), a GTK window,
+  USB tablet + keyboard. With no desktop (ssh, no `WAYLAND_DISPLAY`/`DISPLAY`) or
+  `--vnc`, the screen goes to VNC on the first free 590N on all interfaces, with a
+  random 8-character password (passed via a 0600 secret file, not argv) printed at
+  start. `--bus sata` for installed Windows (no virtio drivers),
+  `--snapshot` to try a repair without writing. It refuses a disk with mounted
+  filesystems or active swap, and the `restartos`-labelled boot disk. Network is
+  NAT by default (works on Wi-Fi); `--bridge [dev]` puts the wired port into
+  `br-vm` through NetworkManager (temporary `vm-bridge`/`vm-bridge-port`
+  connections, bridge MAC = port MAC so DHCP keeps the host's address) plus a tap
+  per VM. When the last VM exits, it removes them and reactivates the port's
+  previous connection. Runs as restartos (the disk group opens `/dev` disks; sudo
+  is only used for the bridge and tap). UEFI vars live next to a disk file
+  (`name.efivars.fd`), and only for the run with `/dev` disks.
 * **glusterfs** — GlusterFS built from source, not from debs: configure + make in
   `/builds/source/glusterfs/glusterfs-<ver>` first (`GLUSTER_SRC=` picks another tree).
   `packages.txt` only lists its runtime libraries; `post-build` runs `make install-strip`

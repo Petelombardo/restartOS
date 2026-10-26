@@ -3,4 +3,7 @@
 # architecture, so they are in packages-<arch>.txt; this file has the common parts.
 #   qemu-system-gui  GTK/SDL display and audio modules (-display gtk|sdl)
 #   qemu-utils       qemu-img, qemu-nbd
-qemu-system-gui qemu-utils
+#   ipxe-qemu        NIC option ROMs (efi-virtio.rom, ...): only a Recommends of
+#                    qemu-system-arm, but without it any VM with a default NIC
+#                    fails to start ("failed to find romfile")
+qemu-system-gui qemu-utils ipxe-qemu
