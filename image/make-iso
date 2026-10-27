@@ -73,6 +73,11 @@ menuentry 'restartOS' {
 	linux /isolinux/vmlinuz64 $CMDLINE
 	initrd /isolinux/initrd.img
 }
+
+# Extra entries on a USB stick (install-win10pe writes them); upgrade leaves it alone
+if [ -f \$prefix/custom.cfg ]; then
+	source \$prefix/custom.cfg
+fi
 EOF
 
 # The EFI binary's built-in config finds this ISO by a file unique to this build
@@ -97,10 +102,13 @@ mkfs.vfat -C -n RESTARTEFI "$WORK/boot/efiboot.img" $EFIKB > /dev/null
 mmd -i "$WORK/boot/efiboot.img" ::/EFI ::/EFI/boot
 mcopy -i "$WORK/boot/efiboot.img" "$WORK/EFI/boot/bootx64.efi" ::/EFI/boot/
 
-# USB kit for install-usb, which makes an MBR stick with a FAT32 data partition
-# (1, holds EFI/boot) and the ext4 "restartos" partition (2, holds boot/grub,
-# isolinux/ and the images). Both loaders read boot/grub/grub.cfg from partition 2.
+# USB kit for install-usb, which makes an MBR stick with a FAT32 EFI partition
+# (1, holds EFI/boot and any WinPE), the ext4 "restartos" partition (2, holds
+# boot/grub, isolinux/ and the images) and an ext4 data partition (3). Both
+# loaders read boot/grub/grub.cfg from partition 2.
 # "(,msdos2)" in the grub prefix is partition 2 of the disk grub was loaded from.
+# The kit has no module directory, so everything grub.cfg and custom.cfg use is
+# built in: fat, chain (UEFI) and ntldr (BIOS) for install-win10pe's entries.
 # BIOS: boot.img goes in the MBR and core.img in the gap before partition 1.
 cp "$WORK/boot/grub/grub.cfg" "$WORK/usb/boot/grub/"
 cp /usr/lib/grub/i386-pc/boot.img "$WORK/usb/boot/grub/i386-pc/"
@@ -108,11 +116,11 @@ cp /usr/lib/grub/i386-pc/boot.img "$WORK/usb/boot/grub/i386-pc/"
 # number the BIOS passes in is always used
 printf '\x90\x90' | dd of="$WORK/usb/boot/grub/i386-pc/boot.img" bs=1 seek=$((0x66)) conv=notrunc status=none
 grub-mkimage -O i386-pc -o "$WORK/usb/boot/grub/i386-pc/core.img" -p "(,msdos2)/boot/grub" \
-	biosdisk part_msdos ext2 linux normal configfile search test
+	biosdisk part_msdos ext2 fat linux ntldr normal configfile search test
 # UEFI: the firmware loads bootx64.efi from partition 1; the same "(,msdos2)"
 # prefix points grub at partition 2 of that disk.
 grub-mkimage -O x86_64-efi -o "$WORK/usb/EFI/boot/bootx64.efi" -p "(,msdos2)/boot/grub" \
-	part_msdos ext2 fat linux normal configfile search test all_video
+	part_msdos ext2 fat linux chain normal configfile search test all_video
 tar -czf "$WORK/boot.tar.gz" -C "$WORK/usb" --owner=0 --group=0 boot
 tar -czf "$WORK/efi.tar.gz" -C "$WORK/usb" --owner=0 --group=0 EFI
 rm -r "$WORK/usb"

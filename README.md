@@ -253,14 +253,36 @@ The ISO also carries `boot.tar.gz` and `efi.tar.gz`, a prebuilt grub kit for
 `/usr/local/sbin`), which writes it to a stick (BIOS: `boot.img` in the MBR
 and `core.img` before partition 1; UEFI: `EFI/boot/bootx64.efi` on the FAT
 partition), so the live system needs no grub. Both find `boot/grub/grub.cfg` on
-partition 2 of the disk they were loaded from.
+partition 2 of the disk they were loaded from. The kit has no module directory,
+so every grub module the menus use is built into the two images.
 
-The restartOS partition (2) gets twice the size of the images, at least 8 GiB
-(`RESTARTOS_GB=<n>` overrides), because `upgrade` downloads each new image next
-to the old one; the FAT32 `Data` partition (1) gets the rest. When restartOS was
+The stick's layout (MBR):
+
+| # | Filesystem | Label | Size | Holds |
+| --- | --- | --- | --- | --- |
+| 1 | FAT32 | `EFI` | 512 MiB (`EFI_MB=<n>`) | `EFI/boot/bootx64.efi`, and any WinPE from `install-win10pe` |
+| 2 | ext4 | `restartos` | 2× the images + 1 GiB, at least 4 GiB (`RESTARTOS_GB=<n>`) | `boot/grub`, `isolinux/`, the images |
+| 3 | ext4 | `restartos-data` | the rest (`DATA_GB=<n>`; `0` leaves it unpartitioned) | podman storage (`/etc/podman.conf` mounts it by label) |
+
+Partition 2 holds two copies of the images because `upgrade` downloads each new
+image next to the old one. Partition 3 comes right after it, so deleting
+partition 3 leaves room to grow partition 2. Anything that needs real Linux
+permissions, such as podman's storage, goes on partition 3, never on the FAT
+partition. When restartOS was
 booted from the ISO `dd`'d to a writable flash drive, `install-usb` offers to
 turn that drive into a full install (it checks first that every image made it
 into RAM). It refuses disks in use by LVM, RAID or dm-crypt.
+
+`install-win10pe <iso> [/dev/sdX]` (amd64 only) adds a Windows PE ISO to such a
+stick's grub menu. Windows' boot manager can't read ext4, and wimboot can't help
+under UEFI (it only reads a volume the firmware can open), so the ISO's files go
+loose onto partition 1. On UEFI, grub chainloads the ISO's EFI loader, kept as
+`EFI/BOOT/PE/bootx64.efi`; on BIOS, grub's `ntldr` starts its `bootmgr`. The
+entry goes in `boot/grub/custom.cfg` on partition 2, which `grub.cfg` sources
+and `upgrade` leaves alone. Running it again replaces the previous WinPE. A
+WinPE bigger than the free space means remaking the stick with a bigger
+`EFI_MB` (the script prints the size to use). Sticks made before this layout
+need remaking first: their grub lacks `chain`/`ntldr` and the `custom.cfg` hook.
 
 Test in qemu (`test-qemu` and `image/qemu` are arm64-only):
 

@@ -5,14 +5,19 @@
 # media, so the drive restartOS was booted from can itself be overwritten.
 #
 # Layout (MBR):
-#   1  FAT32 "Data"       EFI/boot/bootx64.efi, the rest is free space
-#   2  ext4  "restartos"  boot/grub, isolinux/ and the images
+#   1  FAT32 "EFI"             EFI/boot/bootx64.efi; room for install-win10pe
+#   2  ext4  "restartos"       boot/grub, isolinux/ and the images
+#   3  ext4  "restartos-data"  the rest of the disk, for podman storage and the
+#                              like (podman.conf mounts it by label)
 # Both loaders read boot/grub/grub.cfg from partition 2 ("(,msdos2)" prefix).
-# Partition 2 holds two copies of the images (at least 8 GiB): upgrade downloads
-# each new image next to the old one and only then replaces it.
+# Partition 2 holds two copies of the images (at least 4 GiB): upgrade downloads
+# each new image next to the old one and only then replaces it. Partition 3 comes
+# right after it, so dropping partition 3 later leaves room to grow partition 2.
 #
 # Usage: install-usb [/dev/sdX]
-#   RESTARTOS_GB=<n> install-usb ...   size partition 2 yourself
+#   EFI_MB=<n>        size partition 1 (default 512; a big WinPE needs more)
+#   RESTARTOS_GB=<n>  size partition 2 yourself
+#   DATA_GB=<n>       size partition 3 (0: leave the rest of the disk unpartitioned)
 
 FAIL=0
 bold=$(tput bold 2> /dev/null)
@@ -138,23 +143,26 @@ IMAGES=$(( $(du -ckL "${FILES[@]}" 2> /dev/null | tail -1 | cut -f1) * 2 ))	# se
 TOTALSECTORS=$(blockdev --getsz "$disk")
 # MBR can't address past 2 TiB; a bigger disk just leaves the rest unused
 [ $TOTALSECTORS -gt 4294967295 ] && TOTALSECTORS=4294967295
-DATAMIN=$((256*MiB))
+P1SIZE=$(( ${EFI_MB:-512} * MiB ))
+P2START=$((MiB + P1SIZE))
 if [ -n "$RESTARTOS_GB" ]; then
-	RSIZE=$((RESTARTOS_GB*1024*MiB))
+	P2SIZE=$((RESTARTOS_GB*1024*MiB))
 else
-	RSIZE=$((IMAGES*2 + 1024*MiB))
-	[ $RSIZE -lt $((8192*MiB)) ] && RSIZE=$((8192*MiB))
+	P2SIZE=$((IMAGES*2 + 1024*MiB))
+	[ $P2SIZE -lt $((4096*MiB)) ] && P2SIZE=$((4096*MiB))
 fi
-[ $RSIZE -gt $((TOTALSECTORS - MiB - DATAMIN)) ] && RSIZE=$((TOTALSECTORS - MiB - DATAMIN))
-if [ $RSIZE -lt $((IMAGES + 256*MiB)) ]; then
-	echo "$disk ($(describe "$disk")) is too small: restartOS needs $(( (IMAGES + 256*MiB + DATAMIN) / MiB )) MiB."
+[ $P2SIZE -gt $((TOTALSECTORS - P2START)) ] && P2SIZE=$((TOTALSECTORS - P2START))
+P2SIZE=$((P2SIZE / MiB * MiB))
+if [ $P2SIZE -lt $((IMAGES + 256*MiB)) ]; then
+	echo "$disk ($(describe "$disk")) is too small: restartOS needs $(( (P2START + IMAGES + 256*MiB) / MiB )) MiB."
 	exit 1
 fi
-[ $RSIZE -lt $((IMAGES*2)) ] && echo "Note: $disk is small, so upgrade won't have room to download the biggest images next to the old ones."
-# partition 2 starts on a 1 MiB boundary and runs to the end of the disk
-P2START=$(( (TOTALSECTORS - RSIZE) / MiB * MiB ))
-P2SIZE=$((TOTALSECTORS - P2START))
-P1SIZE=$((P2START - MiB))
+[ $P2SIZE -lt $((IMAGES*2)) ] && echo "Note: $disk is small, so upgrade won't have room to download the biggest images next to the old ones."
+# partition 3 gets the rest (or DATA_GB); under 1 GiB isn't worth a partition
+P3START=$((P2START + P2SIZE))
+P3SIZE=$(( (TOTALSECTORS - P3START) / MiB * MiB ))
+[ -n "$DATA_GB" ] && [ $((DATA_GB*1024*MiB)) -lt $P3SIZE ] && P3SIZE=$((DATA_GB*1024*MiB))
+[ $P3SIZE -lt $((1024*MiB)) ] && P3SIZE=0
 
 ## If the target holds the ISO we booted from, everything has to be in RAM:
 ## loadsystem skips images that don't fit, and those would be lost.
@@ -181,7 +189,12 @@ fi
 echo "Current contents of $disk:"
 lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$disk"
 echo ""
-echo "New layout: $((P1SIZE / MiB)) MiB FAT32 \"Data\" + $((P2SIZE / MiB)) MiB restartOS ($((IMAGES / MiB)) MiB of it used now)"
+echo -n "New layout: $((P1SIZE / MiB)) MiB FAT32 EFI + $((P2SIZE / MiB)) MiB restartOS ($((IMAGES / MiB)) MiB of it used now)"
+if [ $P3SIZE -gt 0 ]; then
+	echo " + $((P3SIZE / MiB)) MiB ext4 \"restartos-data\""
+else
+	echo ", no data partition"
+fi
 echo -n "Ready to overwrite disk ${bold}$disk ($(describe "$disk"))${normal}? [n]: "
 read choice
 if [ ! "$choice" == "y" ] && [ ! "$choice" == "Y" ] && [ ! "$choice"  == "yes" ]; then
@@ -204,13 +217,16 @@ dd if=/dev/zero of="$disk" bs=1M count=100 conv=fsync status=none
 
 ## Create the partition table ##
 echo "Creating the partition table"
-sfdisk --force -q -X dos "$disk" << EOF || FAIL=1
-$MiB,$P1SIZE,b
-$P2START,$P2SIZE,83,*
-EOF
+{
+	echo "$MiB,$P1SIZE,b"
+	echo "$P2START,$P2SIZE,83,*"
+	[ $P3SIZE -gt 0 ] && echo "$P3START,$P3SIZE,83"
+} | sfdisk --force -q -X dos "$disk" || FAIL=1
+LAST=2
+[ $P3SIZE -gt 0 ] && LAST=3
 udevadm settle
 for i in $(seq 10); do
-	[ -b "$(part 1)" ] && [ -b "$(part 2)" ] && break
+	[ -b "$(part 1)" ] && [ -b "$(part $LAST)" ] && break
 	sleep 1
 done
 unmount_disk		# in case a desktop automounted the new partitions
@@ -218,7 +234,10 @@ unmount_disk		# in case a desktop automounted the new partitions
 ## Create the filesystem and set the UUID and label (necessary for booting from the initrd) ##
 echo "Creating the new filesystem"
 mkfs.ext4 -q -F "$(part 2)" -L restartos || FAIL=1
-mkfs.vfat -F32 "$(part 1)" -n Data > /dev/null || FAIL=1
+mkfs.vfat -F32 "$(part 1)" -n EFI > /dev/null || FAIL=1
+if [ $P3SIZE -gt 0 ]; then
+	mkfs.ext4 -q -F "$(part 3)" -L restartos-data || FAIL=1
+fi
 echo "Setting up the proper UUID for the boot media"
 tune2fs "$(part 2)" -U bfc78250-6182-4e41-818f-b5f9b4d6c0ba > /dev/null
 
@@ -258,6 +277,7 @@ dd if=/mnt/d2/boot/grub/i386-pc/core.img of="$disk" bs=512 seek=1 conv=notrunc,f
 echo "Waiting for data to finish writing to your disk."
 sync
 df -h --output=size,used,avail /mnt/d2 | sed -e 's/^/restartOS partition: /' | tail -1
+[ $P3SIZE -gt 0 ] && echo "Partition 3 ($(part 3), label restartos-data) is free for podman: set ENABLED=1 in /etc/podman.conf."
 umount /mnt/d2
 umount /mnt/d1
 if [ $FAIL -ne 0 ]; then

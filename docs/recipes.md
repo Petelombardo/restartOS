@@ -217,7 +217,8 @@ Current addons:
   restartos (100000:65536, rootless) and a registries.conf.d drop-in so bare image
   names resolve on docker.io. No storage.conf: the driver auto-detects (overlay, else vfs).
   Ported v14 helpers (v14 tree: `/builds/static-addons-podman.v14`): `/etc/podman.conf`
-  (`ENABLED=1`, `DEVICE`, `FOLDER`, `TYPE=root|user`; persist it with make-persistent),
+  (`ENABLED=1`, `DEVICE` (default `/dev/disk/by-label/restartos-data`, partition 3 of an
+  install-usb stick), `FOLDER`, `TYPE=root|user`; persist it with make-persistent),
   `/scripts/startup/podman` mounts the disk and runs `install-podman` (binds
   `FOLDER/var/lib/containers`, `FOLDER/var/tmp`, `FOLDER/containers` → rootless storage;
   runtime dirs stay on tmpfs), then starts `restartos-podman.service`, which runs

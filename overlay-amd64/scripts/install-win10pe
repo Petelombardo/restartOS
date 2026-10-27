@@ -1,0 +1,182 @@
+#!/bin/bash
+# Add a Windows PE rescue ISO (Win10PE, Hiren's, a Windows install ISO, ...) to a
+# restartOS drive made by install-usb, as an entry in its grub menu.
+# Windows' boot manager reads FAT, NTFS and UDF but not ext4, and the firmware
+# only reads FAT, so the WinPE files go loose onto the drive's FAT32 EFI
+# partition (1) and Windows' own loaders start them:
+#   UEFI: grub chainloads the ISO's efi/boot/bootx64.efi, kept as
+#         EFI/BOOT/PE/bootx64.efi so it doesn't replace grub's own bootx64.efi
+#   BIOS: grub's ntldr starts the ISO's bootmgr
+# The menu entry goes in boot/grub/custom.cfg on partition 2, which grub.cfg
+# sources. Running this again replaces the previous WinPE (winpe-files.txt on
+# partition 1 lists what it copied).
+#
+# Usage: install-win10pe path/to/WinPE.iso [/dev/sdX]
+
+BOOTUUID=bfc78250-6182-4e41-818f-b5f9b4d6c0ba	# install-usb gives partition 2 this UUID
+bold=$(tput bold 2> /dev/null)
+normal=$(tput sgr0 2> /dev/null)
+
+if [ "$(id -u)" != 0 ]; then
+	echo "You must run this command as root.  Try running this again with ${bold}sudo${normal}."
+	exit 1
+fi
+if [ ! -f "$1" ]; then
+	echo "Usage: install-win10pe path/to/WinPE.iso [/dev/sdX]"
+	exit 1
+fi
+ISO=$(readlink -f "$1")
+
+if [ -n "$2" ]; then
+	disk=/dev/${2#/dev/}
+else
+	dev=$(blkid -U $BOOTUUID)
+	if [ -z "$dev" ]; then
+		echo "No restartOS drive made by install-usb is plugged in. Plug it in, or name it: install-win10pe $1 /dev/sdX"
+		exit 1
+	fi
+	disk=/dev/$(lsblk -no PKNAME "$dev" | head -1)
+fi
+
+part() {
+	case "$disk" in
+		*[0-9]) echo "${disk}p$1" ;;
+		*) echo "$disk$1" ;;
+	esac
+}
+ESP=$(part 1)
+BOOT=$(part 2)
+if [ "$(blkid -s TYPE -o value "$ESP")" != "vfat" ] || [ "$(blkid -s UUID -o value "$BOOT")" != "$BOOTUUID" ]; then
+	echo "$disk is not a restartOS drive made by install-usb."
+	exit 1
+fi
+
+WORK=$(mktemp -d)
+MOUNTED=()
+cleanup() {
+	for m in "${MOUNTED[@]}"; do umount "$m"; done
+	rm -rf "$WORK"
+}
+trap cleanup EXIT
+
+# Sets DIR to where partition $1 is mounted, mounting it on $WORK/$2 if it
+# isn't already (upgrade and make-persistent leave partition 2 on /mnt/system)
+mountdir() {
+	DIR=$(findmnt -rno TARGET -S "$1" | head -1)
+	[ -n "$DIR" ] && return 0
+	DIR=$WORK/$2
+	mkdir -p "$DIR"
+	mount "$1" "$DIR" || return 1
+	MOUNTED+=("$DIR")
+}
+
+mkdir -p "$WORK/iso"
+if ! mount -o ro,loop "$ISO" "$WORK/iso"; then
+	echo "Could not mount $ISO."
+	exit 1
+fi
+MOUNTED=("$WORK/iso")
+mountdir "$ESP" esp || { echo "Could not mount $ESP."; exit 1; }
+ESPDIR=$DIR
+mountdir "$BOOT" boot || { echo "Could not mount $BOOT."; exit 1; }
+BOOTDIR=$DIR
+
+GRUBCFG=$BOOTDIR/boot/grub/grub.cfg
+if ! grep -q custom.cfg "$GRUBCFG" 2> /dev/null; then
+	echo "$disk was made by an older install-usb whose grub can't start WinPE. Make it again with install-usb from a current restartOS ISO."
+	exit 1
+fi
+
+## What the ISO has. FAT ignores case, but the ISO's names don't: match any case.
+cd "$WORK/iso"
+WIM=$(find . -maxdepth 2 -ipath ./sources/boot.wim | head -1)
+BOOTMGR=$(find . -maxdepth 1 -type f -iname bootmgr | head -1)
+EFIDIR=$(find . -maxdepth 1 -type d -iname efi | head -1)
+PEEFI=""
+[ -n "$EFIDIR" ] && PEEFI=$(find "$EFIDIR" -maxdepth 2 -ipath "$EFIDIR/boot/bootx64.efi" | head -1)
+if [ -z "$WIM" ] || { [ -z "$BOOTMGR" ] && [ -z "$PEEFI" ]; }; then
+	echo "$1 doesn't look like a Windows PE ISO (no sources/boot.wim, bootmgr or efi/boot/bootx64.efi)."
+	exit 1
+fi
+
+# Everything on the ISO goes to the root of partition 1, except its efi/boot
+# (that would replace grub): its EFI loader goes to EFI/BOOT/PE instead
+shopt -s dotglob nullglob
+SRC=()
+DST=()
+for f in *; do
+	if [ "$f" == "${EFIDIR#./}" ]; then
+		for sub in "$f"/*; do
+			sub=${sub#*/}
+			[ "${sub,,}" == "boot" ] && continue
+			SRC+=("$f/$sub")
+			DST+=("EFI/$sub")
+		done
+	else
+		SRC+=("$f")
+		DST+=("$f")
+	fi
+done
+
+## Remove the previous WinPE, then check it fits
+OLDLIST=$ESPDIR/winpe-files.txt
+if [ -f "$OLDLIST" ]; then
+	echo "Removing the previous WinPE"
+	while read -r f; do
+		case "$f" in ""|/*|*..*|EFI|EFI/|[Ee][Ff][Ii]/[Bb][Oo][Oo][Tt]) continue ;; esac
+		rm -rf "${ESPDIR:?}/$f"
+	done < "$OLDLIST"
+	rm -f "$OLDLIST"
+fi
+NEED=$(du -ck "${SRC[@]}" ${PEEFI:+"$PEEFI"} | tail -1 | cut -f1)
+FREE=$(df --output=avail -k "$ESPDIR" | tail -1)
+if [ $NEED -gt $FREE ]; then
+	USED=$(df --output=used -k "$ESPDIR" | tail -1)
+	echo "This WinPE needs $((NEED / 1024)) MiB but $disk's EFI partition has $((FREE / 1024)) MiB free."
+	echo "Make the drive again with a bigger EFI partition: ${bold}EFI_MB=$(( (NEED + USED) / 1024 + 64 )) install-usb $disk${normal}"
+	exit 1
+fi
+
+## Copy (no -p/-o/-g: FAT has no permissions or owners)
+echo "Copying $(basename "$ISO") to $disk's EFI partition"
+printf '%s\n' "${DST[@]}" > "$OLDLIST"
+for i in "${!SRC[@]}"; do
+	mkdir -p "$ESPDIR/$(dirname "${DST[$i]}")"
+	rsync -rt --info=progress2 "${SRC[$i]}" "$ESPDIR/$(dirname "${DST[$i]}")/" || { echo "Copying ${SRC[$i]} failed."; exit 1; }
+done
+if [ -n "$PEEFI" ]; then
+	mkdir -p "$ESPDIR/EFI/BOOT/PE"
+	cp "$PEEFI" "$ESPDIR/EFI/BOOT/PE/bootx64.efi" || exit 1
+	echo "EFI/BOOT/PE" >> "$OLDLIST"
+fi
+
+## Menu entry: only where the ISO can boot (UEFI, BIOS or both)
+NAME=$(basename "$ISO" .iso | tr -d '"$\\')
+ESPUUID=$(blkid -s UUID -o value "$ESP")
+CUSTOM=$BOOTDIR/boot/grub/custom.cfg
+[ -f "$CUSTOM" ] && sed -i '/^# install-win10pe begin/,/^# install-win10pe end/d' "$CUSTOM"
+{
+	echo "# install-win10pe begin"
+	# grub's "true" isn't built into the kit, so only a one-platform ISO gets an "if"
+	[ -z "$BOOTMGR" ] && echo 'if [ "$grub_platform" = "efi" ]; then'
+	[ -z "$PEEFI" ] && echo 'if [ "$grub_platform" = "pc" ]; then'
+	cat <<EOF
+menuentry "$NAME (Windows PE)" {
+	search --no-floppy --fs-uuid --set=root $ESPUUID
+	if [ "\$grub_platform" = "efi" ]; then
+		chainloader /EFI/BOOT/PE/bootx64.efi
+	else
+		ntldr /${BOOTMGR#./}
+	fi
+}
+EOF
+	[ -n "$PEEFI" ] && [ -n "$BOOTMGR" ] || echo "fi"
+	echo "# install-win10pe end"
+} >> "$CUSTOM"
+
+cd /
+echo "Waiting for data to finish writing to your disk."
+sync
+[ -n "$PEEFI" ] || echo "Note: this ISO has no UEFI loader, so it only shows up in the menu on BIOS boot."
+[ -n "$BOOTMGR" ] || echo "Note: this ISO has no bootmgr, so it only shows up in the menu on UEFI boot."
+echo "Finished: \"$NAME (Windows PE)\" is in $disk's boot menu."
