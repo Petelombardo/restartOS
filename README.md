@@ -51,6 +51,7 @@ packages.txt         base seed packages        packages-arm64.txt / packages-amd
 overlay/             files laid over the base  overlay-arm64/ (Armbian MOTD, MT7961 firmware)
 build                builds the base           -> /builds/static-addons-system-trixie
 build-addon          builds addons/<name>      -> /builds/static-addons-<name>
+rebuild              build + compress any of the above in order, then the boot image
 resolve.py collect.py  dependency closure and file lists from the host dpkg db
 addons/<name>/       packages.txt, bases, overlay/, post-build
 scripts/compress     squashfs an output tree   -> /builds/packages/<name>.img
@@ -107,6 +108,24 @@ addon copies. It is never committed.
 Everything that builds runs as root (file ownership and setuid bits must be
 exact). Build in this order: addons are resolved against the **compressed**
 images in `/builds/packages`.
+
+`rebuild` does the build, compress and image steps below in one command, in
+that order, whatever order you name the targets in:
+
+```
+sudo ./rebuild "what changed" system labwc podman image=/builds/restartOS/x86/<kver>
+sudo ./rebuild "what changed" all                # system + every addon in /builds/packages
+./rebuild -n "what changed" system labwc         # just print the plan
+```
+
+Each image's changelog line is `<target>: what changed`. Addons wait for any
+addon their `bases` names (labwc before chromium). `image=<dir>` runs
+`image/make-iso` on amd64 or `image/make` elsewhere, from that ISO or board dir.
+It stops at the first failure, including a `compress` that didn't write its image.
+At the end it lists addons that sit on a rebuilt addon but weren't rebuilt
+themselves; that only matters if the lower addon's packages changed.
+
+The same steps by hand:
 
 ```
 cd /builds/minimal-system

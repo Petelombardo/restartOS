@@ -1,0 +1,139 @@
+#!/bin/bash
+# Build and compress images in one go, in build order.
+# usage: sudo ./rebuild [-n] "comment" <target>...
+#   -n            just print what would be built, in order (no root needed)
+#   system        the base: build, point /builds/system at it, compress
+#   <addon>       addons/<addon>: build-addon, compress
+#   all           system plus every addon this host already has an image of
+#                 in /builds/packages (the ones it ships)
+#   image=<dir>   afterwards, the boot image from that dir: the ISO on amd64
+#                 (image/make-iso), a board image elsewhere (image/make)
+# Targets go in build order whatever order they're named in: system first, then
+# each addon after the addons its bases file names (labwc before chromium), since
+# addons resolve against the compressed images. Each image's changelog line is
+# "<target>: comment". Stops at the first failure.
+set -e -o pipefail
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+
+usage() {
+	echo "usage: sudo $0 [-n] \"comment\" <system|addon|all|image=<dir>>..."
+	echo "addons: $(cd "$HERE/addons" && ls -d */ | tr -d / | tr '\n' ' ')"
+	exit 1
+}
+DRY=0
+[ "$1" == "-n" ] && DRY=1 && shift
+[ $# -ge 2 ] || usage
+if [ $DRY -eq 0 ] && [ "$(id -u)" != 0 ]; then
+	echo "Builds run as root: sudo $0 $(printf '"%s" ' "$@")"
+	exit 1
+fi
+COMMENT=$1
+shift
+
+SYSTEM=0
+ADDONS=()
+IMAGEDIR=""
+for t in "$@"; do
+	case "$t" in
+		system) SYSTEM=1 ;;
+		all)
+			SYSTEM=1
+			for img in /builds/packages/static-addons-*.img; do
+				a=$(basename "$img" .img)
+				a=${a#static-addons-}
+				[ -f "$HERE/addons/$a/packages.txt" ] && ADDONS+=("$a")
+			done ;;
+		image=*)
+			IMAGEDIR=$(readlink -f "${t#image=}")
+			[ -f "$IMAGEDIR/config" ] || { echo "$IMAGEDIR has no config: image= needs an ISO or board dir"; exit 1; } ;;
+		*)
+			[ -f "$HERE/addons/$t/packages.txt" ] || { echo "No addon \"$t\" (addons/$t/packages.txt)"; usage; }
+			ADDONS+=("$t") ;;
+	esac
+done
+ADDONS=($(printf '%s\n' "${ADDONS[@]}" | sort -u))
+
+# The addons named in addons/$1/bases (static-addons-<name>.img lines)
+lower() {
+	[ -f "$HERE/addons/$1/bases" ] || return 0
+	sed -n 's|.*/static-addons-\(.*\)\.img$|\1|p' "$HERE/addons/$1/bases"
+}
+
+# Order the addons: each one after any of its lower layers that are also being built
+ORDER=()
+LEFT=("${ADDONS[@]}")
+while [ ${#LEFT[@]} -gt 0 ]; do
+	NEXT=()
+	for a in "${LEFT[@]}"; do
+		wait=0
+		for l in $(lower "$a"); do
+			printf '%s\n' "${LEFT[@]}" | grep -qx "$l" && [ "$l" != "$a" ] && wait=1
+		done
+		if [ $wait -eq 0 ]; then ORDER+=("$a"); else NEXT+=("$a"); fi
+	done
+	if [ ${#NEXT[@]} -eq ${#LEFT[@]} ]; then
+		echo "Addons whose bases name each other in a loop: ${NEXT[*]}"
+		exit 1
+	fi
+	LEFT=("${NEXT[@]}")
+done
+
+PLAN=()
+[ $SYSTEM -eq 1 ] && PLAN+=(system)
+PLAN+=("${ORDER[@]}")
+[ -n "$IMAGEDIR" ] && PLAN+=("image=$IMAGEDIR")
+[ ${#PLAN[@]} -gt 0 ] || usage
+# Addons sitting on a layer rebuilt here but not rebuilt themselves
+SKIPPED=()
+for d in "$HERE"/addons/*/; do
+	a=$(basename "$d")
+	[ -f /builds/packages/static-addons-$a.img ] || continue
+	printf '%s\n' "${ORDER[@]}" | grep -qx "$a" && continue
+	for l in $(lower "$a"); do
+		printf '%s\n' "${ORDER[@]}" | grep -qx "$l" && { SKIPPED+=("$a (on $l)"); break; }
+	done
+done
+skipped_note() {
+	[ ${#SKIPPED[@]} -gt 0 ] || return 0
+	echo "Not rebuilt, though a layer under them is: ${SKIPPED[*]}"
+	echo "That only matters if that layer's packages changed (not just its overlay)."
+}
+echo "Rebuilding: ${PLAN[*]}"
+if [ $DRY -eq 1 ]; then
+	skipped_note
+	exit 0
+fi
+
+# compress doesn't fail when mksquashfs does: check the image was rewritten
+MARK=$(mktemp)
+trap 'rm -f "$MARK"' EXIT
+compress_in() {
+	(cd "$1" && ./compress "$2: $COMMENT")
+	[ /builds/packages/$3.img -nt "$MARK" ] || { echo "compress didn't write /builds/packages/$3.img"; exit 1; }
+}
+
+if [ $SYSTEM -eq 1 ]; then
+	echo; echo "=== system"
+	"$HERE/build"
+	ln -sfn static-addons-system-trixie /builds/system
+	compress_in /builds/system system system
+fi
+for a in "${ORDER[@]}"; do
+	echo; echo "=== $a"
+	"$HERE/build-addon" "$a"
+	compress_in /builds/static-addons-$a "$a" static-addons-$a
+done
+
+if [ -n "$IMAGEDIR" ]; then
+	echo; echo "=== image ($IMAGEDIR)"
+	cd "$IMAGEDIR"
+	if [ "$(dpkg --print-architecture)" == "amd64" ]; then
+		"$HERE/image/make-iso"
+	else
+		"$HERE/image/make"
+	fi
+fi
+
+echo
+echo "Done: ${PLAN[*]}  (version $(cat /builds/restartOS/version))"
+skipped_note
