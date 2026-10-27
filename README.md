@@ -209,6 +209,9 @@ per-architecture parts are split out:
 - `overlay-arm64/` (Armbian MOTD and release file, MT7961 firmware) isn't
   applied on amd64, so x86 gets only the restartOS MOTD. Put x86-only files in
   `overlay-amd64/`.
+- The amd64 base also has `grub-install` for BIOS (`i386-pc`), UEFI
+  (`x86_64-efi`, `i386-efi`) and Secure Boot (Debian's signed grub + shim), for
+  repairing other machines' boot loaders. Usage is in `packages-amd64.txt`.
 - `build` knows each architecture's dynamic loader (arm64 and amd64).
 - `initrd/build-initrd` works the same on amd64.
 

@@ -6,3 +6,19 @@ firmware-amd-graphics firmware-mediatek
 # mkfs.hfsplus/fsck.hfsplus (trixie non-free; the x86 host has non-free enabled)
 hfsprogs
 intel-microcode amd64-microcode
+# Bootloader repair: grub-install for legacy BIOS (i386-pc), 64-bit UEFI
+# (x86_64-efi) and 32-bit UEFI (i386-efi), plus Debian's signed grub and shim so
+# grub-install sets up a Secure Boot chain (shimx64.efi + grubx64.efi, mmx64,
+# fbx64; mokutil comes with shim-signed). Only the -bin/-signed packages: grub-pc
+# and grub-efi-amd64 conflict, and their postinsts would install grub on the host.
+# No maintainer script to reproduce: grub-common.service only records boot
+# success for the running system's grub and stays disabled. The live root has no
+# real /boot, so point grub-install at the mounted target, e.g.
+#   grub-install --target=i386-pc --boot-directory=/mnt/boot /dev/sdX
+#   grub-install --target=x86_64-efi --efi-directory=/mnt/boot/efi \
+#                --boot-directory=/mnt/boot --bootloader-id=debian
+# (--removable also writes EFI/BOOT/BOOTX64.EFI; --no-nvram when restartOS was
+# booted in BIOS mode and can't write EFI variables). grub-mkconfig/update-grub
+# describe the running root, so run those in a chroot of the target.
+grub-common grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-ia32-bin
+grub-efi-amd64-signed shim-signed
