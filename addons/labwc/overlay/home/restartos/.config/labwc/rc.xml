@@ -71,6 +71,9 @@
     <keybind key="W-Return">
       <action name="Execute" command="lxterminal" />
     </keybind>
+    <keybind key="W-t">
+      <action name="Execute" command="lxterminal" />
+    </keybind>
     <keybind key="W-l">
       <action name="Lock Screen">
 	<command>swaylock -f -c 000000</command>
