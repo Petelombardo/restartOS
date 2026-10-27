@@ -10,7 +10,7 @@
 # Boot assets come from the host's Debian packages, nothing binary is kept here:
 #   apt install xorriso isolinux syslinux-common grub-efi-amd64-bin grub-pc-bin mtools dosfstools
 # The ISO also carries boot.tar.gz and efi.tar.gz, a prebuilt grub kit that
-# scripts/install-usb writes to a USB stick, so the live system needs no grub.
+# install-usb (overlay-amd64/scripts) writes to a USB stick, so the live system needs no grub.
 . "$(dirname "$(readlink -f "$0")")/../scripts/restartos-env"
 set -e
 TESTBUILD=0

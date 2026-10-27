@@ -1,0 +1,267 @@
+#!/bin/bash
+# Write a bootable restartOS drive (BIOS + UEFI) from the running system.
+# Needs the grub kit (boot.tar.gz, efi.tar.gz) that image/make-iso puts on the
+# x86 ISO. Everything is copied from /mnt/boot, the initrd's RAM copy of the boot
+# media, so the drive restartOS was booted from can itself be overwritten.
+#
+# Layout (MBR):
+#   1  FAT32 "Data"       EFI/boot/bootx64.efi, the rest is free space
+#   2  ext4  "restartos"  boot/grub, isolinux/ and the images
+# Both loaders read boot/grub/grub.cfg from partition 2 ("(,msdos2)" prefix).
+# Partition 2 holds two copies of the images (at least 8 GiB): upgrade downloads
+# each new image next to the old one and only then replaces it.
+#
+# Usage: install-usb [/dev/sdX]
+#   RESTARTOS_GB=<n> install-usb ...   size partition 2 yourself
+
+FAIL=0
+bold=$(tput bold 2> /dev/null)
+normal=$(tput sgr0 2> /dev/null)
+MiB=2048			# sectors
+
+if [ "$(id -u)" != 0 ]; then
+	echo "You must run this command as root.  Try running this again with ${bold}sudo${normal}."
+	exit 1
+fi
+
+for f in boot.tar.gz efi.tar.gz vmlinuz64 initrd.img system.img; do
+	if [ ! -f /mnt/boot/$f ]; then
+		echo "/mnt/boot/$f is missing: install-usb only works when booted from the x86 restartOS ISO or a drive made by it."
+		exit 1
+	fi
+done
+
+# Whole disks only (lsblk calls optical drives "rom" and loop devices "loop"),
+# and not empty card reader slots (size 0: a card going in shows up as new)
+list_disks() {
+	lsblk -dpnbo NAME,TYPE,SIZE | awk '$2 == "disk" && $3 > 0 && $1 !~ /^\/dev\/zram/ {print $1}'
+}
+
+describe() {
+	lsblk -dno SIZE,TRAN,MODEL "$1" | sed -e 's/  */ /g' -e 's/^ //' -e 's/ $//'
+}
+
+## The ISO dd'd to a flash drive ("ISO emulation"): an iso9660 "restartos"
+## filesystem on a disk (the whole disk and its first partition both carry it).
+## Offered as the target when it's writable, to turn it into a full install.
+ISODISK=""
+for dev in $(blkid -o device -t LABEL=restartos 2> /dev/null); do
+	[ "$(blkid -s TYPE -o value "$dev")" == "iso9660" ] || continue
+	parent=$(lsblk -no PKNAME "$dev" | head -1)
+	[ -n "$parent" ] && dev=/dev/$parent
+	[ "$(lsblk -dno TYPE "$dev")" == "disk" ] || continue
+	[ "$(cat /sys/block/$(basename "$dev")/ro)" == "0" ] || continue
+	ISODISK=$dev
+done
+
+disk=""
+if [ -n "$1" ]; then
+	disk=/dev/${1#/dev/}
+elif [ -n "$ISODISK" ]; then
+	echo "restartOS is running from the ISO written to ${bold}$ISODISK${normal} ($(describe "$ISODISK"))."
+	echo "Turning it into a full restartOS drive makes upgrades and persistent data possible."
+	echo -n "Install restartOS onto $ISODISK? [n]: "
+	read choice
+	case "$choice" in
+		y|Y|yes) disk=$ISODISK ;;
+	esac
+fi
+
+if [ -z "$disk" ]; then
+	BEFORE=$(list_disks)
+	echo -n "Insert the USB drive now, or press Enter to choose from a list"
+	COUNT=0
+	while [ -z "$disk" ] && [ $COUNT -lt 30 ]; do
+		# read -t is the one-second wait; Enter skips straight to the list
+		read -t 1 -s && break
+		disk=$(comm -13 <(echo "$BEFORE" | sort) <(list_disks | sort) | head -1)
+		echo -n "."
+		COUNT=$((COUNT+1))
+	done
+	echo
+	# give a new drive's partitions a moment to appear before looking at them
+	[ -n "$disk" ] && sleep 2 && udevadm settle
+fi
+
+if [ -z "$disk" ]; then
+	DISKS=($(list_disks))
+	echo ""
+	echo "ID   Disk"
+	for i in "${!DISKS[@]}"; do
+		echo "$((i+1))    ${DISKS[$i]}  $(describe "${DISKS[$i]}")"
+	done
+	echo ""
+	echo -n "Type the ID matching the disk that you wish to ${bold}overwrite${normal}: "
+	read disknum
+	if [[ "$disknum" =~ ^[0-9]+$ ]] && [ "$disknum" -ge 1 ]; then
+		disk=${DISKS[$((disknum-1))]}
+	fi
+fi
+
+if [ -z "$disk" ] || [ ! -b "$disk" ] || [ "$(lsblk -dno TYPE "$disk")" != "disk" ]; then
+	echo "Sorry, but that is not a valid selection. Exiting."
+	exit 1
+fi
+
+# Partitions get a "p" before the number when the disk name ends in a digit (nvme0n1p1, mmcblk0p1)
+part() {
+	case "$disk" in
+		*[0-9]) echo "${disk}p$1" ;;
+		*) echo "$disk$1" ;;
+	esac
+}
+
+## Refuse disks that LVM, RAID or dm-crypt are using: unmounting isn't enough there
+if lsblk -rno TYPE "$disk" | grep -qvE '^(disk|part)$'; then
+	echo "$disk is in use by LVM, RAID or encryption:"
+	lsblk "$disk"
+	echo "Stop those first (vgchange -an <vg>, mdadm --stop, cryptsetup close). Exiting."
+	exit 1
+fi
+
+## Size the partitions
+EXCLUDE=()
+if [ -f /mnt/boot/static-addons-persistent.img ]; then
+	echo -n "Do you want to copy over your persistent data? [n]: "
+	read persistent
+	case "$persistent" in
+		y|Y|yes) ;;
+		*) EXCLUDE=(--exclude=static-addons-persistent.img) ;;
+	esac
+	echo ""
+fi
+FILES=(/mnt/boot/system*.img /mnt/boot/static-addons-*.img /mnt/boot/version
+	/mnt/boot/boot.tar.gz /mnt/boot/efi.tar.gz /mnt/boot/vmlinuz64 /mnt/boot/initrd.img)
+[ ${#EXCLUDE[@]} -gt 0 ] && FILES=($(printf '%s\n' "${FILES[@]}" | grep -v '/static-addons-persistent\.img$'))
+IMAGES=$(( $(du -ckL "${FILES[@]}" 2> /dev/null | tail -1 | cut -f1) * 2 ))	# sectors
+
+TOTALSECTORS=$(blockdev --getsz "$disk")
+# MBR can't address past 2 TiB; a bigger disk just leaves the rest unused
+[ $TOTALSECTORS -gt 4294967295 ] && TOTALSECTORS=4294967295
+DATAMIN=$((256*MiB))
+if [ -n "$RESTARTOS_GB" ]; then
+	RSIZE=$((RESTARTOS_GB*1024*MiB))
+else
+	RSIZE=$((IMAGES*2 + 1024*MiB))
+	[ $RSIZE -lt $((8192*MiB)) ] && RSIZE=$((8192*MiB))
+fi
+[ $RSIZE -gt $((TOTALSECTORS - MiB - DATAMIN)) ] && RSIZE=$((TOTALSECTORS - MiB - DATAMIN))
+if [ $RSIZE -lt $((IMAGES + 256*MiB)) ]; then
+	echo "$disk ($(describe "$disk")) is too small: restartOS needs $(( (IMAGES + 256*MiB + DATAMIN) / MiB )) MiB."
+	exit 1
+fi
+[ $RSIZE -lt $((IMAGES*2)) ] && echo "Note: $disk is small, so upgrade won't have room to download the biggest images next to the old ones."
+# partition 2 starts on a 1 MiB boundary and runs to the end of the disk
+P2START=$(( (TOTALSECTORS - RSIZE) / MiB * MiB ))
+P2SIZE=$((TOTALSECTORS - P2START))
+P1SIZE=$((P2START - MiB))
+
+## If the target holds the ISO we booted from, everything has to be in RAM:
+## loadsystem skips images that don't fit, and those would be lost.
+if [ "$disk" == "$ISODISK" ]; then
+	mkdir -p /mnt/iso
+	if ! mount -o ro "$disk" /mnt/iso; then
+		echo "Can't mount $disk to check that the RAM copy is complete. Exiting."
+		exit 1
+	fi
+	MISSING=""
+	for f in /mnt/iso/*.img /mnt/iso/boot.tar.gz /mnt/iso/efi.tar.gz /mnt/iso/isolinux/vmlinuz64 /mnt/iso/isolinux/initrd.img; do
+		[ -f "$f" ] || continue
+		[ "$(stat -Lc %s "$f")" == "$(stat -Lc %s /mnt/boot/$(basename "$f") 2> /dev/null)" ] || MISSING="$MISSING $(basename "$f")"
+	done
+	umount /mnt/iso
+	if [ -n "$MISSING" ]; then
+		echo "These files on $disk aren't in RAM (not enough memory at boot), so overwriting it would lose them:"
+		echo "$MISSING"
+		echo "Write restartOS to another drive instead. Exiting."
+		exit 1
+	fi
+fi
+
+echo "Current contents of $disk:"
+lsblk -o NAME,SIZE,FSTYPE,LABEL,MOUNTPOINT "$disk"
+echo ""
+echo "New layout: $((P1SIZE / MiB)) MiB FAT32 \"Data\" + $((P2SIZE / MiB)) MiB restartOS ($((IMAGES / MiB)) MiB of it used now)"
+echo -n "Ready to overwrite disk ${bold}$disk ($(describe "$disk"))${normal}? [n]: "
+read choice
+if [ ! "$choice" == "y" ] && [ ! "$choice" == "Y" ] && [ ! "$choice"  == "yes" ]; then
+	echo "Action Aborted"
+	exit
+fi
+
+unmount_disk() {
+	for p in $(lsblk -lnpo NAME "$disk"); do
+		grep -q "^$p " /proc/swaps && swapoff "$p"
+		findmnt -rno TARGET -S "$p" | while read -r t; do umount "$t"; done
+	done
+}
+unmount_disk
+
+echo "Clearing boot record"
+# wipefs also removes the ISO's backup GPT at the end of the disk
+for p in $(lsblk -lnpo NAME "$disk" | tac); do wipefs -qa "$p"; done
+dd if=/dev/zero of="$disk" bs=1M count=100 conv=fsync status=none
+
+## Create the partition table ##
+echo "Creating the partition table"
+sfdisk --force -q -X dos "$disk" << EOF || FAIL=1
+$MiB,$P1SIZE,b
+$P2START,$P2SIZE,83,*
+EOF
+udevadm settle
+for i in $(seq 10); do
+	[ -b "$(part 1)" ] && [ -b "$(part 2)" ] && break
+	sleep 1
+done
+unmount_disk		# in case a desktop automounted the new partitions
+
+## Create the filesystem and set the UUID and label (necessary for booting from the initrd) ##
+echo "Creating the new filesystem"
+mkfs.ext4 -q -F "$(part 2)" -L restartos || FAIL=1
+mkfs.vfat -F32 "$(part 1)" -n Data > /dev/null || FAIL=1
+echo "Setting up the proper UUID for the boot media"
+tune2fs "$(part 2)" -U bfc78250-6182-4e41-818f-b5f9b4d6c0ba > /dev/null
+
+## Mount the new filesystem ##
+mkdir -p /mnt/d1 /mnt/d2
+if ! mount "$(part 2)" /mnt/d2 || ! mount "$(part 1)" /mnt/d1; then
+	echo "${bold}Could not mount the new partitions on $disk. Exiting.${normal}"
+	exit 1
+fi
+
+## Copy files to the new filesystem ##
+echo "** Copying the system files **"
+rsync -a --info=progress2 /mnt/boot/system*.img /mnt/boot/version /mnt/d2/ || FAIL=1
+echo "** Copying boot files **"
+# boot.tar.gz and efi.tar.gz are the prebuilt grub kit from image/make-iso;
+# they are kept on the stick too so it can make further sticks
+cp /mnt/boot/boot.tar.gz /mnt/d2/ || FAIL=1
+tar -xf /mnt/boot/boot.tar.gz -C /mnt/d2/ --no-same-owner || FAIL=1
+mkdir -p /mnt/d2/isolinux
+cp /mnt/boot/vmlinuz64 /mnt/boot/initrd.img /mnt/d2/isolinux/ || FAIL=1
+echo "** Copying EFI boot folder **"
+cp /mnt/boot/efi.tar.gz /mnt/d2/ || FAIL=1
+tar -xf /mnt/boot/efi.tar.gz -C /mnt/d1/ --no-same-owner || FAIL=1
+echo "** Copying add-on packages **"
+if ls /mnt/boot/static-addons-*.img > /dev/null 2>&1; then
+	rsync -a --info=progress2 "${EXCLUDE[@]}" /mnt/boot/static-addons-*.img /mnt/d2/ || FAIL=1
+fi
+
+## Install grub for legacy BIOS boot: boot.img in the MBR (440 bytes, leaving
+## the partition table alone) and core.img in the gap before partition 1.
+## UEFI boot needs nothing more than EFI/boot/bootx64.efi on partition 1.
+echo "Installing the bootloader"
+dd if=/mnt/d2/boot/grub/i386-pc/boot.img of="$disk" bs=440 count=1 conv=notrunc,fsync status=none || FAIL=1
+dd if=/mnt/d2/boot/grub/i386-pc/core.img of="$disk" bs=512 seek=1 conv=notrunc,fsync status=none || FAIL=1
+
+## Wait for disk to sync, then cleanup ##
+echo "Waiting for data to finish writing to your disk."
+sync
+df -h --output=size,used,avail /mnt/d2 | sed -e 's/^/restartOS partition: /' | tail -1
+umount /mnt/d2
+umount /mnt/d1
+if [ $FAIL -ne 0 ]; then
+	echo "${bold}Something went wrong above; this USB drive may not boot.${normal}"
+	exit 1
+fi
+echo "Your new USB drive is ready!"

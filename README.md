@@ -207,8 +207,8 @@ per-architecture parts are split out:
   `armbian-firmware`. Firmware needs `non-free-firmware` in the host's apt
   sources.
 - `overlay-arm64/` (Armbian MOTD and release file, MT7961 firmware) isn't
-  applied on amd64, so x86 gets only the restartOS MOTD. Put x86-only files in
-  `overlay-amd64/`.
+  applied on amd64, so x86 gets only the restartOS MOTD. x86-only files go in
+  `overlay-amd64/`: `install-usb`, which needs the ISO's grub kit.
 - The amd64 base also has `grub-install` for BIOS (`i386-pc`), UEFI
   (`x86_64-efi`, `i386-efi`) and Secure Boot (Debian's signed grub + shim), for
   repairing other machines' boot loaders. Usage is in `packages-amd64.txt`.
@@ -249,10 +249,18 @@ confuse it. The images are grafted into the ISO from `/builds/packages`, so
 `/builds` only needs room for the ISO itself.
 
 The ISO also carries `boot.tar.gz` and `efi.tar.gz`, a prebuilt grub kit for
-`scripts/install-usb`, which writes it to a stick (BIOS: `boot.img` in the MBR
+`install-usb` (amd64 only: `overlay-amd64/scripts/install-usb`, linked into
+`/usr/local/sbin`), which writes it to a stick (BIOS: `boot.img` in the MBR
 and `core.img` before partition 1; UEFI: `EFI/boot/bootx64.efi` on the FAT
 partition), so the live system needs no grub. Both find `boot/grub/grub.cfg` on
 partition 2 of the disk they were loaded from.
+
+The restartOS partition (2) gets twice the size of the images, at least 8 GiB
+(`RESTARTOS_GB=<n>` overrides), because `upgrade` downloads each new image next
+to the old one; the FAT32 `Data` partition (1) gets the rest. When restartOS was
+booted from the ISO `dd`'d to a writable flash drive, `install-usb` offers to
+turn that drive into a full install (it checks first that every image made it
+into RAM). It refuses disks in use by LVM, RAID or dm-crypt.
 
 Test in qemu (`test-qemu` and `image/qemu` are arm64-only):
 
