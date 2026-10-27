@@ -74,10 +74,9 @@
     <keybind key="W-t">
       <action name="Execute" command="lxterminal" />
     </keybind>
+    <!-- lock the way swayidle does: relaunches swaylock if labwc drops it -->
     <keybind key="W-l">
-      <action name="Lock Screen">
-	<command>swaylock -f -c 000000</command>
-      </action>
+      <action name="Execute" command="restartos-display lock" />
     </keybind>
     <!--
       Remove a previously defined keybind
