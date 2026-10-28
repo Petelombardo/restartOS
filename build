@@ -86,7 +86,7 @@ DAYS=$(( $(date +%s) / 86400 ))
 cp "$R/usr/share/base-passwd/passwd.master" "$R/etc/passwd"
 cp "$R/usr/share/base-passwd/group.master" "$R/etc/group"
 sed -i -e 's#^root:\(.*\):/bin/sh$#root:\1:/bin/bash#' "$R/etc/passwd"
-POSTINST_USERS="_chrony avahi tcpdump statd _rpc"      # created by maintainer scripts, not sysusers.d
+POSTINST_USERS="_chrony avahi tcpdump statd _rpc iperf3"      # created by maintainer scripts, not sysusers.d
 POSTINST_GROUPS="_chrony netdev _ssh avahi tcpdump"
 SYSUSERS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1=="u" || $1=="u!" {print $2}')
 SYSGROUPS=$(cat "$R"/usr/lib/sysusers.d/*.conf | awk '$1 ~ /^(u|u!|g)$/ {print $2}')

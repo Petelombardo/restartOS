@@ -66,7 +66,8 @@ avahi-daemon avahi-utils libnss-mdns
 # ec2metadata. GPT uses sfdisk from fdisk, so gdisk isn't needed.
 qemu-guest-agent cloud-guest-utils
 
-# Network diagnostics (nmap without its NSE scripts, see collect.py)
-bind9-dnsutils bind9-host nmap bmon tcpdump mtr-tiny
+# Network diagnostics (nmap without its NSE scripts, see collect.py); iperf3 server
+# is not enabled: run `iperf3 -s` or `systemctl start iperf3`
+bind9-dnsutils bind9-host nmap bmon tcpdump mtr-tiny iperf3
 
 # Firmware and other per-architecture seeds: packages-<arch>.txt
