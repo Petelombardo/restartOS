@@ -34,6 +34,9 @@ hfsplus
 vmfs-tools vmfs6-tools
 # data recovery: ddrescue; disk health: smartctl (smartd not enabled)
 gddrescue smartmontools
+# hardware sensors (temps, fans, voltages via hwmon): sensors. lm-sensors.service
+# (applies sensors.conf "set" lines) is not enabled; sensors-detect needs full perl, not shipped
+lm-sensors
 # NFS server (and client: nfs-common, rpcbind). Export real disks, not the RAM root
 nfs-kernel-server
 
