@@ -131,6 +131,9 @@ to always becomes `system.img`.
   it (read back + compare), then swaps it in; the previous archive stays as `.img.bak`
   (`make-persistent restore` swaps them back). It refuses to save over an archive it can't
   read. The initrd only loads `static*.img`, so `.new`/`.bak` are ignored at boot.
+  `make-persistent update` refreshes everything in the archive; `update <path>...` refreshes
+  only those (folders mirrored, so deletions carry over). `add` on a path that's already
+  persistent does the same as `update <path>` (no duplicate persistent-dirs.txt entry).
 * Never bake credentials into an image (claude login, pi `auth.json`/`mcp.json`,
   ssh keys): log in on the device and `make-persistent add` instead.
 

@@ -40,8 +40,8 @@ restore)
         echo "Actions"
 	echo
         echo "${bold}help${normal}      - This page; ex: make-persistent help"
-        echo "${bold}add${normal}       - Add files/folders to persistent storage; ex: make-persistent add /etc /home/restartos/test.txt"
-        echo "${bold}update${normal}    - Update an existing persistent storage archive; ex: make-persistent update"
+        echo "${bold}add${normal}       - Add files/folders to persistent storage (ones already in it are updated); ex: make-persistent add /etc /home/restartos/test.txt"
+        echo "${bold}update${normal}    - Update everything in the persistent archive, or only the files/folders given; ex: make-persistent update; ex: make-persistent update /etc/shadow"
         echo "${bold}list${normal}      - List the files/folders in the current persistent storage archive; ex: make-persistent list"
         echo "${bold}remove${normal}    - Remove persistence; ex: make-persistent remove /tmp/test.txt; ex: make-persistent remove"
         echo "${bold}restore${normal}   - Go back to the previous persistent archive (swaps it with the current one); ex: make-persistent restore"
@@ -134,6 +134,16 @@ if [ -f $IMG ]; then
 	fi
 fi
 
+in_archive() {
+	[ -e "/tmp/squashtmp$1" ] || [ -L "/tmp/squashtmp$1" ]
+}
+
+# Re-copy one persistent file/folder from the live system. Folders are mirrored
+# (--delete), so files deleted from them drop out of the archive too.
+sync_path() {
+	rsync -aRx --delete "$1" /tmp/squashtmp/
+}
+
 case $ACTION in
 remove)
         COUNT=0
@@ -179,30 +189,55 @@ list)
 	exit
 	;;
 add)
-	if [ !  "$ARGS" == "" ]; then
-		for i in "$@"
-		do
-			if [ ! "$i" == "add" ]; then
-				echo "$i"
-				if [ -f "$i" ] || [ -d "$i" ]; then
-					if [ -d "$i" ]; then
-						mkdir -p /tmp/squashtmp/scripts
-						if [ -f /scripts/persistent-dirs.txt ]; then
-							cp -a /scripts/persistent-dirs.txt /tmp/squashtmp/scripts/
-						fi
-						echo "$i" >> /tmp/squashtmp/scripts/persistent-dirs.txt
-						cp -a /tmp/squashtmp/scripts/persistent-dirs.txt /scripts/
-					fi
-					cp -aRv --parents "$i" /tmp/squashtmp/
+	for i in "$@"
+	do
+		[ "$i" == "add" ] && continue
+		i=$(realpath -s -m "$i")
+		if in_archive "$i"; then
+			# Already persistent: refresh it like "update <path>" instead of adding it twice
+			echo "$i (already persistent, updating)"
+			sync_path "$i"
+		elif [ -f "$i" ] || [ -d "$i" ]; then
+			echo "$i"
+			if [ -d "$i" ]; then
+				mkdir -p /tmp/squashtmp/scripts
+				if [ -f /scripts/persistent-dirs.txt ]; then
+					cp -a /scripts/persistent-dirs.txt /tmp/squashtmp/scripts/
 				fi
+				echo "$i" >> /tmp/squashtmp/scripts/persistent-dirs.txt
+				cp -a /tmp/squashtmp/scripts/persistent-dirs.txt /scripts/
 			fi
-		done
-	fi
+			cp -aRv --parents "$i" /tmp/squashtmp/
+		fi
+	done
 	;;
 update)
-	rsync -l --existing --delete -avx / /tmp/squashtmp/
-	if [ -f /scripts/persistent-dirs.txt ]; then
-		rsync -l -avx --delete --recursive --files-from=/scripts/persistent-dirs.txt / /tmp/squashtmp/
+	if [ $# -le 1 ]; then
+		rsync -l --existing --delete -avx / /tmp/squashtmp/
+		if [ -f /scripts/persistent-dirs.txt ]; then
+			rsync -l -avx --delete --recursive --files-from=/scripts/persistent-dirs.txt / /tmp/squashtmp/
+		fi
+	else
+		COUNT=0
+		for i in "$@"
+		do
+			[ "$i" == "update" ] && continue
+			i=$(realpath -s -m "$i")
+			if ! in_archive "$i"; then
+				echo "Skipping $i: it isn't persistent yet (use ${bold}make-persistent add $i${normal})."
+			elif [ ! -e "$i" ] && [ ! -L "$i" ]; then
+				echo "Skipping $i: it no longer exists here (use ${bold}make-persistent remove $i${normal})."
+			else
+				echo "Updating $i"
+				sync_path "$i"
+				COUNT=$((COUNT+1))
+			fi
+		done
+		if [ $COUNT -eq 0 ]; then
+			echo "Nothing to update."
+			finish
+			exit 1
+		fi
 	fi
 	;;
 esac
