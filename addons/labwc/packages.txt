@@ -35,3 +35,7 @@ polkitd lxpolkit
 fonts-noto-color-emoji fonts-font-awesome adwaita-icon-theme librsvg2-common
 # Symbol glyphs terminal apps (claude, pi, prompts) use, same set as the build host
 fonts-symbola fonts-cantarell
+# Metric-compatible Arial/Helvetica/Times/Courier: without them web font stacks
+# like "...Arial, sans-serif, Noto Color Emoji" match nothing in Chromium until
+# the emoji font, which then supplies digits/spaces (wide, spaced-out text)
+fonts-liberation
