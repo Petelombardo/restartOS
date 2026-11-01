@@ -20,6 +20,8 @@ thunar-volman
 ristretto
 # Thumbnail D-Bus service ristretto/thunar ask for (only a Recommends, so not pulled in)
 tumbler
+# Calculator
+galculator
 
 # Used by ~/.config/waybar/config buttons
 wofi thunar pulsemixer
