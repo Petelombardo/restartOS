@@ -5,6 +5,12 @@ overlay
 loop
 ext4
 vfat
+# vfat's default iocharset/codepage; modules on some kernels (Ubuntu/DGX:
+# FAT_DEFAULT_IOCHARSET=iso8859-1 with NLS_ISO8859_1=m), and vfat mounts fail
+# with EINVAL ("IO charset iso8859-1 not found") without them.
+nls_iso8859-1
+nls_cp437
+nls_utf8
 isofs
 usb-storage
 uas

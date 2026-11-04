@@ -32,7 +32,7 @@ sudo ./initrd/build-initrd <kernel version> [output]
 | File | Role |
 |---|---|
 | `conf/initramfs.conf` | `MODULES=most`, busybox, gzip |
-| `conf/modules` | squashfs, overlay, loop, ext4, vfat, isofs, usb-storage, uas |
+| `conf/modules` | squashfs, overlay, loop, ext4, vfat (+ nls_iso8859-1, nls_cp437, nls_utf8: vfat mounts fail on kernels where these are modules, e.g. the DGX Spark's), isofs, usb-storage, uas |
 | `conf/hooks/restartos` | copies the files below in, adds `pv`, util-linux `blkid` and `zramctl`, runs `patch-init` |
 | `files/patch-init` | patches `/init`: `root=USB`/`root=CDROM` search for the media instead of naming a device, and `/scripts/usb` is sourced after the boot script so its `mountroot()` always wins |
 | `files/scripts/usb` | `mountroot()`: waits up to 30s for the restartOS media (`find-linux`), mounts it at `/drive`, runs `loadsystem` and `common` |
