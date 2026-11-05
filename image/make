@@ -167,7 +167,10 @@ MINOR=$(echo $BLOCKDEV | cut -d':' -f2)
 echo mknod /dev/$DEVICE b $MAJOR $MINOR
 mknod /dev/$DEVICE b $MAJOR $MINOR
 if [ "$FILESYSTEM" == "fat" ]; then
-	mkdosfs -F 32 -n restartos /dev/$DEVICE
+	# -h: record the partition's start sector as "hidden sectors", as a normal
+	# mkfs on a partition (and the stock Armbian images) would; on a kpartx
+	# device mkdosfs can't see it and writes 0.
+	mkdosfs -F 32 -h $OFFSET -n restartos $MKFSOPTS /dev/$DEVICE
 elif [ "$FILESYSTEM" == "ext2" ]; then
 	mkfs.ext2 -m 0 -i 16384 $MKFSOPTS /dev/$DEVICE -L restartos
 else

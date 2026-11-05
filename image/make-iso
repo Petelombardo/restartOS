@@ -52,7 +52,10 @@ mkdir -p "$WORK/isolinux" "$WORK/boot/grub" "$WORK/EFI/boot" "$WORK/.disk" \
 # The initrd finds the media by its "restartos" label (find-linux), so that is
 # the ISO's volume id, whether booted as a CD or from a dd'd USB stick.
 # CMDLINE matches both loaders; root=USB selects the label search.
-CMDLINE="root=USB rootdelay=10 rw $APPEND"
+# USB-SATA bridges with broken UAS use usb-storage instead (:u). The kernel caps
+# usb-storage.quirks at 127 chars (~10 entries); same list as the board configs.
+USB_QUIRKS="2109:0715:u,2109:0711:u,152d:0578:u,152d:1561:u,174c:55aa:u,174c:1153:u,357d:7788:u,2537:1066:u,2537:1068:u,0080:a001:u"
+CMDLINE="root=USB rootdelay=10 rw usb-storage.quirks=$USB_QUIRKS $APPEND"
 
 cp $ISOLINUX/isolinux.bin $SYSLINUX/ldlinux.c32 "$WORK/isolinux/"
 cat > "$WORK/isolinux/isolinux.cfg" <<EOF
