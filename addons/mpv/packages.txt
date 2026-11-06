@@ -1,3 +1,5 @@
 # restartOS 15 mpv addon (sits on system.img + static-addons-labwc.img)
 # Kept out of labwc because of its ffmpeg stack (~140 MB uncompressed of new deps).
+# ffmpeg CLI (ffmpeg/ffprobe) rides along: it reuses mpv's libav*/libplacebo/SDL2, ~3 MB extra.
 mpv
+ffmpeg

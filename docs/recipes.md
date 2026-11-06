@@ -262,7 +262,7 @@ Current addons:
   then `make-persistent add /var/lib/bluetooth` so pairings survive reboots.
   WirePlumber switches earbuds to HFP (mono voice mic) when an app opens the mic and back
   to A2DP afterwards; for better listening on calls, use another mic and keep the earbuds on A2DP.
-* **mpv** — bases system + labwc; just `mpv`, kept out of labwc because its ffmpeg
+* **mpv** — bases system + labwc; `mpv` + `ffmpeg` (the CLI adds ~3 MB since mpv already pulls in libav*), kept out of labwc because its ffmpeg
   stack adds ~140 MB (uncompressed) of new dependencies.
   `overlay/etc/mpv/mpv.conf` sets `vo=gpu`: on RK3588 with Mesa 25.0 Panfrost the
   default `gpu-next` renderer hangs the whole system ~10 s into playback (software
